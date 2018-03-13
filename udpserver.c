@@ -226,7 +226,6 @@ int main(int argc, char **argv)
                             printf("packet received with sequence number = %d and bytes received = %d \n",recv_seq_num,bytes_received);
 
                             fwrite(recv_buf+8,1,bytes_received,received_file);
-                            printf("received:\n %s\n\n",recv_buf+8 );
                             memset(ack,'\0',sizeof(ack));
                             sprintf(ack,"%s,%d","ACK",recv_seq_num+bytes_received-1);
 

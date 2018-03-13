@@ -23,6 +23,7 @@
 #define MSS_DATA 1016
 
 
+
  // Structures definition
  typedef struct data_node
  {
@@ -64,6 +65,8 @@
  int base=0,curr=0;
  int cwnd=3*MSS_DATA;
  int bytes_running=1;
+ int ack_seq_num;
+ int SS_Thresh= 61440;
 
 void error(char *msg)
 {
@@ -157,7 +160,7 @@ void* rate_control(void* param)
             {
               if(curr-base==cwnd || curr+current_to_send->bytes>base+cwnd)
               // START TIMER
-              {//printf("starting timer\n" );
+              {
 
               alarm_is_on=1;
               alarm(SLEEP_VAL);
@@ -224,11 +227,15 @@ void* rate_control(void* param)
           }
           pthread_mutex_unlock(&send_Q_mutex);
 
+
           alarm_is_on=1;
           alarm(SLEEP_VAL);
 
-          cwnd=MSS_DATA;
 
+          printf("UPDATING CWND AND SS_Thresh\n" );
+          cwnd=MSS_DATA;
+          if(SS_Thresh>1016)
+            SS_Thresh=SS_Thresh/2;
           // change
           alarm_fired=0;
         }
@@ -284,7 +291,7 @@ void* receive_ack(void* param)
   pthread_mutex_lock(&first_run_mutex);
   (void) signal(SIGALRM, mysig);
   unsigned char buf[BUFSIZE];
-  int ack_seq_num;
+
   while(1)
   {
 
@@ -350,8 +357,12 @@ void* receive_ack(void* param)
             pthread_mutex_lock(&send_Q_mutex);
             pthread_mutex_lock(&send_global_mutex);
 
-            if(ack_seq_num>base)
+            if(cwnd<=SS_Thresh)
+              {
+                  if(ack_seq_num>base)
                     cwnd+=(MSS_DATA);
+              }
+
             if(send_Q_head!=NULL)
             {
                 data_node* tmp_trav=send_Q_head;
@@ -369,6 +380,9 @@ void* receive_ack(void* param)
             {
                 base=ack_seq_num;
                 alarm_is_on=0;
+                if(cwnd>=SS_Thresh)
+                if(ack_seq_num>base)
+                  cwnd+=(MSS_DATA);
 
             }
             else if(strcmp(code,"ACK")==0 && ack_seq_num < curr)

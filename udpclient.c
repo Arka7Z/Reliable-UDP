@@ -21,7 +21,7 @@
 #define SLEEP_VAL 2
 #define MSS 1024
 #define MSS_DATA 1016
-
+#define SEND_Q_LIMIT 50
 
 
  // Structures definition
@@ -36,6 +36,7 @@
 
 typedef struct {
   char code[10];
+  int isData;
   int ack_seq_num;
 }response;
  typedef struct node
@@ -71,6 +72,8 @@ typedef struct {
  int bytes_running=1;
  int ack_seq_num;
  int SS_Thresh= 61440;
+ sem_t send_full,send_empty;
+ int filesize;
 
 void error(char *msg)
 {
@@ -78,7 +81,27 @@ void error(char *msg)
     exit(0);
 }
 
+void shift()
+{
 
+  int tmp1,tmp2;
+  tmp1=last_ack;
+  tmp2=last_one_ack;
+  last_ack=ack_seq_num;
+  last_one_ack=tmp1;
+  last_two_ack=tmp2;
+
+}
+
+int check_for_triple_duplicate()
+{
+  pthread_mutex_lock(&send_global_mutex);
+  if(ack_seq_num==last_ack && last_ack==last_one_ack && last_two_ack==last_one_ack && last_two_ack==ack_seq_num)
+    return 1;
+  else
+   return 0;
+   pthread_mutex_unlock(&send_global_mutex);
+}
 void mysig(int sig)
 {
     pid_t pid;
@@ -111,15 +134,13 @@ void* rate_control(void* param)
     pthread_mutex_lock(&send_Q_mutex);
     data_node* current_to_send=send_Q_head;
     pthread_mutex_unlock(&send_Q_mutex);
-
-        pthread_mutex_lock(&send_Q_mutex);
         pthread_mutex_lock(&send_global_mutex);
-      //  printf("Lock acquired, alarm_fired: %d, alarm_is_on: %d\n",alarm_fired, alarm_is_on );
+        pthread_mutex_lock(&send_Q_mutex);
+
+
         while((1 && !alarm_fired) || first_entry)
         {
-          //printf("Inside alarm_fired check\n" );
-          if(current_to_send==NULL)
-            printf("NULL NULLL\n" );
+
           if(current_to_send!=NULL)
           {
 
@@ -127,7 +148,7 @@ void* rate_control(void* param)
             {
               // send the packet
               memset(packet_buf,0,sizeof(packet_buf));
-                //printf("INSIDE\n" );
+
               char_num.no=curr+1;
               packet_buf[0]=char_num.bytes[0];
               packet_buf[1]=char_num.bytes[1];
@@ -185,11 +206,11 @@ void* rate_control(void* param)
         //printf("checking for timeout: %d\n",alarm_fired );
         if(alarm_fired)
         {
+
           pthread_mutex_lock(&send_Q_mutex);
-          //printf("ACQUIRED LOCK IN RETRANSMIT\n");
+
           data_node* tmp_trav=send_Q_head;
-          if(tmp_trav==NULL)
-            printf("NULL NULL\n" );
+
           while(tmp_trav!=NULL)
           {
             //printf("seq num is %d, base:%d, curr: %d\n",tmp_trav->byte_seq_num ,base, curr);
@@ -243,6 +264,15 @@ void* rate_control(void* param)
           // change
           alarm_fired=0;
         }
+
+        pthread_mutex_lock(&send_global_mutex);
+        if(base>=filesize)
+        {
+           pthread_mutex_unlock(&send_global_mutex);
+           printf("filesize-bufsize-8 is %d, base is%d\n",filesize-(BUFSIZE-8),base );
+           break;
+        }
+        pthread_mutex_unlock(&send_global_mutex);
   }
 }
 
@@ -252,6 +282,7 @@ int app_send(unsigned char* packet_buf, int bytes)
   int ret=-1;
 
   //add it to sender buffer
+  sem_wait(&send_empty);
   pthread_mutex_lock(&send_Q_mutex);
   if (send_Q_head==NULL)
   {
@@ -285,6 +316,7 @@ int app_send(unsigned char* packet_buf, int bytes)
   ret=1;
   printf("send q size: %d\n",send_Q_size );
   pthread_mutex_unlock(&send_Q_mutex);
+  sem_post(&send_full);
 
   return ret;
 
@@ -293,6 +325,7 @@ int app_send(unsigned char* packet_buf, int bytes)
 response parse_packets(unsigned char* buf)
 {
   char* tokens;
+  response ack;
   tokens = strtok(buf,",");
   int i=0;
   char code[10];
@@ -316,7 +349,7 @@ response parse_packets(unsigned char* buf)
 
 
   ack_seq_num = atoi(seq_string);
-  response ack;
+
   strcpy(ack.code,code);
 
   return ack;
@@ -325,18 +358,27 @@ response parse_packets(unsigned char* buf)
 void update_window(char* code)
 {
   // ack seq num param not reqd
-
-              pthread_mutex_lock(&send_Q_mutex);
               pthread_mutex_lock(&send_global_mutex);
+              pthread_mutex_lock(&send_Q_mutex);
 
               if(cwnd<MSS_DATA)
                   cwnd=MSS_DATA;
+              if(!( (ack_seq_num==last_ack && last_ack==last_one_ack && last_two_ack==last_one_ack && last_two_ack==ack_seq_num)))
+              {
 
-              if(cwnd<=SS_Thresh)
-                {
-                    if(ack_seq_num>base)
-                      cwnd+=(MSS_DATA);
-                }
+
+                if(cwnd<=SS_Thresh)
+                  {
+                      if(ack_seq_num>base)
+                        cwnd+=(MSS_DATA);
+                  }
+              }
+              else
+              {
+                if(SS_Thresh>1016)
+                  SS_Thresh=SS_Thresh/2;
+                cwnd=SS_Thresh;
+              }
 
               if(send_Q_head!=NULL)
               {
@@ -345,6 +387,8 @@ void update_window(char* code)
                       {
                           data_node* del=tmp_trav;
                           tmp_trav=tmp_trav->next;
+                          sem_post(&send_empty);
+                          send_Q_size--;
                           //free(del);
                       }
                  if(tmp_trav!=NULL)
@@ -368,17 +412,16 @@ void update_window(char* code)
               }
               else
               {
-                //  pthread_mutex_unlock(&send_global_mutex);
-                  //continue;
+
                   ;
               }
               pthread_mutex_unlock(&send_global_mutex);
-  ;
+
 }
 
 void* udp_receive(void* param)
 {
-  pthread_mutex_lock(&first_run_mutex);
+  //pthread_mutex_lock(&first_run_mutex);
   (void) signal(SIGALRM, mysig);
   unsigned char buf[BUFSIZE];
 
@@ -415,7 +458,10 @@ void* udp_receive(void* param)
             printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, cwnd,base);
 
             if(strcmp(code,"ACK")==0)
+            {
+              shift();
               update_window(code);
+            }
 
         }
 
@@ -436,7 +482,8 @@ int main(int argc, char **argv)
     pthread_t udp_receive_thread;
     pthread_mutex_lock(&first_run_mutex);
     pthread_mutex_lock(&one_buff_present);
-
+    sem_init(&send_full,0,0);
+    sem_init(&send_empty,0,SEND_Q_LIMIT);
 
     int read_count=0;
 
@@ -475,7 +522,7 @@ int main(int argc, char **argv)
 
 
     char hello_message[3*BUFSIZE],hello[BUFSIZE];
-    int filesize;
+
     strcpy(hello,"hello\0");
 
 
@@ -555,22 +602,12 @@ int main(int argc, char **argv)
                         break;
                      }
                 remain_data-=nread;
-
-                if(nread > 0)                                // SENDING THE DATA
-                {
-                  app_send(packet_buf,nread);
-                }
-
+                app_send(packet_buf,nread);
             }
-
-
-            sleep(2);
-
 
             if (remain_data==0)
             {
                 printf("Finished reading the file\n");
-                sleep(4);
                 if (feof(fp))
                 {
                     printf("File Sent\n");
@@ -578,14 +615,15 @@ int main(int argc, char **argv)
                 }
                 if (ferror(fp))
                     printf("Error Sending file\n");
-                if(ack_seq_num==to_trans)
                 break;
             }
 
         }
         fclose(fp);
 
-        pthread_cancel(rate_control_thread);
+
+
+        pthread_join(rate_control_thread,NULL);
         pthread_cancel(udp_receive_thread);
         close(sockfd);
 

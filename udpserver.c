@@ -15,6 +15,8 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <openssl/md5.h>
+#include <pthread.h>
+#include <semaphore.h>
 #define BUFSIZE 1024
 #define RECV_Q_LIMIT 30
 
@@ -22,7 +24,7 @@ typedef struct rec_data_node{
   unsigned char* data;
   int bytes;
   int byte_seq_num;
-  struct data_node* next;
+  struct rec_data_node* next;
 }rec_data_node;
 
 typedef union
@@ -51,7 +53,8 @@ int recv_seq_num,exp_seq_num=1,last_in_order=0;
 FILE *received_file;
 rec_data_node* rec_Q_head=NULL;
 int rec_Q_size=0;
-pthread_mutex_t rec_Q_mutex;
+pthread_mutex_t rec_Q_mutex,remain_data_mutex;
+sem_t rec_full,rec_empty;
 
 void error(char *msg)
 {
@@ -78,8 +81,22 @@ void send_ack(int ack_num)
     printf("ACK for seq num: %d sent\n",ack_num );
 }
 
+
+rec_data_node appRecv()
+{
+  sem_wait(&rec_full);
+  pthread_mutex_lock(&rec_Q_mutex);
+  rec_data_node ret=*(rec_Q_head);
+  rec_Q_head=rec_Q_head->next;
+
+  pthread_mutex_unlock(&rec_Q_mutex);
+  sem_post(&rec_empty);
+  return ret;
+}
+
 void recvbuffer_handle(unsigned char* recv_buf)
 {
+  //printf("IN rec buffer handle\n" );
   int ret=-1;
   int_to_char num_char;
   char packet_buf[BUFSIZE];
@@ -101,20 +118,64 @@ void recvbuffer_handle(unsigned char* recv_buf)
 
       bytes_received=num_char.no;                 // BYTES RECIEVED
 
+
       if(remain_data<1016)
       bytes_received=remain_data;
 
+
+      //printf("just before seq if\n" );
       if(recv_seq_num==exp_seq_num )
       {
-          printf("packet received with sequence number = %d and bytes received = %d \n",recv_seq_num,bytes_received);
-          fwrite(recv_buf+8,1,bytes_received,received_file);
 
+          //fwrite(recv_buf+8,1,bytes_received,received_file);
+
+          // IF BUFFER FILLED DROP IT
+          //printf("HERE HERE\n" );
+          sem_wait(&rec_empty);
           // INSERT INTO BUFFER HERE
+          pthread_mutex_lock(&rec_Q_mutex);
+          printf("packet received with sequence number = %d and bytes received = %d \n",recv_seq_num,bytes_received);
+
+          if (rec_Q_head==NULL)
+          {
+              rec_data_node* new_node=(rec_data_node*)malloc(sizeof(rec_data_node));
+              new_node->data=(unsigned char*)(malloc(sizeof(char)*(BUFSIZE-8)));
+              new_node->bytes=bytes_received;
+              new_node->byte_seq_num=exp_seq_num;
+              memcpy(new_node->data,recv_buf+8,bytes_received);
+              new_node->next=NULL;
+              rec_Q_head=new_node;
+          }
+          else
+          {
+              rec_data_node *cursor = rec_Q_head;
+              while(cursor->next != NULL)
+                      cursor = cursor->next;
+              rec_data_node* new_node=(rec_data_node*)malloc(sizeof(rec_data_node));
+              new_node->data=(unsigned char*)(malloc(sizeof(char)*(BUFSIZE-8)));
+              new_node->byte_seq_num=exp_seq_num;
+              new_node->bytes=bytes_received;
+              memcpy(new_node->data,recv_buf+8,bytes_received);
+              new_node->next=NULL;
+              cursor->next = new_node;
+
+          }
+          rec_Q_size++;
+          printf("REC q size: %d\n",rec_Q_size );
+          sem_post(&rec_full);
+          pthread_mutex_unlock(&rec_Q_mutex);
+
 
 
           send_ack(recv_seq_num+bytes_received-1);
+          printf("Returned from send ack\n" );
           last_in_order=recv_seq_num+bytes_received-1;
+
+          pthread_mutex_lock(&remain_data_mutex);
           remain_data -= bytes_received;
+          pthread_mutex_unlock(&remain_data_mutex);
+
+          printf("Decremented remain data\n" );
           exp_seq_num+=bytes_received;
       }
       else if(recv_seq_num!=exp_seq_num )
@@ -144,7 +205,7 @@ void* udp_recieve(void* param)
   memset(recv_buf,'\0',sizeof(recv_buf));
 
 
-  while(remain_data>0)
+  while(1)
   {
               double r = (((double) rand()) / (RAND_MAX));
               printf(" R is %f\n",r);
@@ -171,7 +232,7 @@ void* udp_recieve(void* param)
 
   }
 
-  fclose(received_file);
+
   printf("file received \n");
 
 }
@@ -179,10 +240,12 @@ void* udp_recieve(void* param)
 int main(int argc, char **argv)
 {
 
-      /*
-       * check command line arguments
-       */
+
       pthread_mutex_init(&rec_Q_mutex, NULL);
+      pthread_mutex_init(&remain_data_mutex, NULL);
+      sem_init(&rec_full,0,0);
+      sem_init(&rec_empty,0,100);
+
       if (argc != 2 && argc !=3) {
         printf("Arguments provided: %d\n",argc);
         fprintf(stderr, "usage: %s <port_for_server>\n", argv[0]);
@@ -204,24 +267,18 @@ int main(int argc, char **argv)
       setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR,
 	         (const void *)&optval , sizeof(int));
 
-      /*
-       * build the server's Internet address
-       */
+
       bzero((char *) &serveraddr, sizeof(serveraddr));
       serveraddr.sin_family = AF_INET;
       serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
       serveraddr.sin_port = htons((unsigned short)portno);
 
-      /*
-       * bind: associate the parent socket with a port
-       */
+
       if (bind(sockfd, (struct sockaddr *) &serveraddr,
 	       sizeof(serveraddr)) < 0)
         error("ERROR on binding");
 
-      /*
-       * main loop: wait for a datagram, then echo it
-       */
+
       clientlen = sizeof(clientaddr);
 
       srand(time(0));
@@ -297,15 +354,39 @@ int main(int argc, char **argv)
 
 
             printf("filename : %s , filesize: %d , code: %s \n",filename, filesize, code);
+
+            pthread_mutex_lock(&remain_data_mutex);
             remain_data = filesize;
+            pthread_mutex_unlock(&remain_data_mutex);
+
             received_file = fopen(filename, "ab");
 
             pthread_t receive_thread;
             pthread_create(&receive_thread,NULL,udp_recieve,NULL);
-            pthread_join(receive_thread);
+
+            while(1)
+            {
+              pthread_mutex_lock(&remain_data_mutex);
+              if(remain_data>0)
+              {
+                pthread_mutex_unlock(&remain_data_mutex);
+                rec_data_node data_received=appRecv();
+
+                fwrite(data_received.data,1,data_received.bytes,received_file);
+                //printf("data RECIEVED: %s\n\n",data_received.data );
+              }
+              else
+              {
+
+                break;
+              }
+
+            }
+
+            pthread_cancel(receive_thread);
             printf("Thread Joined\n" );
 
-
+            fclose(received_file);
             sleep(5);
 
 

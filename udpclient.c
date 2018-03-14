@@ -16,7 +16,7 @@
 #include <errno.h>
 #include <openssl/md5.h>
 #include <pthread.h>
-
+#include <semaphore.h>
 #define BUFSIZE 1024
 #define SLEEP_VAL 2
 #define MSS 1024

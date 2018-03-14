@@ -16,6 +16,21 @@
 #include <errno.h>
 #include <openssl/md5.h>
 #define BUFSIZE 1024
+#define RECV_Q_LIMIT 30
+
+typedef struct rec_data_node{
+  unsigned char* data;
+  int bytes;
+  int byte_seq_num;
+  struct data_node* next;
+}rec_data_node;
+
+typedef union
+{
+    int no;
+    char bytes[4];
+
+} int_to_char;
 
 
 int sockfd; /* socket file descriptor - an ID to uniquely identify a socket by the application program */
@@ -34,26 +49,33 @@ int filesize, remain_data;
 char filename[BUFSIZE];
 int recv_seq_num,exp_seq_num=1,last_in_order=0;
 FILE *received_file;
-/*
- * error - wrapper for perror
- */
+rec_data_node* rec_Q_head=NULL;
+int rec_Q_size=0;
+pthread_mutex_t rec_Q_mutex;
+
 void error(char *msg)
 {
   perror(msg);
   exit(1);
 }
 
-typedef union
+
+
+void udp_send(unsigned char* send_buf, int sockfd, struct sockaddr_in addr,int addr_len, int size)
 {
-    int no;
-    char bytes[4];
+  if(sendto(sockfd,send_buf, size, 0, &addr, addr_len)<0)
+      error("ERROR in sending ACK\n");
+}
 
-} int_to_char;
-
-
-void send_ack()
+void send_ack(int ack_num)
 {
-  ;
+    char ack[BUFSIZE];
+    memset(ack,'\0',sizeof(ack));
+    sprintf(ack,"%s,%d","ACK",ack_num);
+    //if(sendto(sockfd,ack, BUFSIZE, 0, &clientaddr, clientlen)<0)
+      //  error("ERROR in sending ACK\n");
+    udp_send(ack,sockfd, clientaddr, clientlen, BUFSIZE);
+    printf("ACK for seq num: %d sent\n",ack_num );
 }
 
 void recvbuffer_handle(unsigned char* recv_buf)
@@ -61,12 +83,7 @@ void recvbuffer_handle(unsigned char* recv_buf)
   int ret=-1;
   int_to_char num_char;
   char packet_buf[BUFSIZE];
-
-
-  char ack[BUFSIZE];
   int bytes_received;
-                            // RECIEVE MESSAGE FROM CLIENT IN recv_buf
-
 
         // getting the sequence number
       num_char.bytes[0]=recv_buf[0];
@@ -90,46 +107,28 @@ void recvbuffer_handle(unsigned char* recv_buf)
       if(recv_seq_num==exp_seq_num )
       {
           printf("packet received with sequence number = %d and bytes received = %d \n",recv_seq_num,bytes_received);
-
           fwrite(recv_buf+8,1,bytes_received,received_file);
-          memset(ack,'\0',sizeof(ack));
-          sprintf(ack,"%s,%d","ACK",recv_seq_num+bytes_received-1);
 
-          if(sendto(sockfd,ack, BUFSIZE, 0, &clientaddr, clientlen)<0)
-              error("ERROR in sending ACK\n");
+          // INSERT INTO BUFFER HERE
 
-          printf(" ACK for num:%d\n",recv_seq_num+bytes_received-1);
+
+          send_ack(recv_seq_num+bytes_received-1);
           last_in_order=recv_seq_num+bytes_received-1;
           remain_data -= bytes_received;
           exp_seq_num+=bytes_received;
-
       }
       else if(recv_seq_num!=exp_seq_num )
       {
-          memset(ack,'\0',sizeof(ack));
-          sprintf(ack,"%s,%d","ACK",last_in_order);
-
-          if(sendto(sockfd,ack, BUFSIZE, 0, &clientaddr, clientlen)<0)
-              error("ERROR in sending ACK\n");
-
-
+          send_ack(last_in_order);
           printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
           printf("sending ACK for sequence number %d again\n",last_in_order);
-
       }
       else
       {
           printf("in else, received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          memset(ack,'\0',sizeof(ack));
-          sprintf(ack,"%s,%d","ACK",last_in_order);
-
-          if(sendto(sockfd,ack, BUFSIZE, 0, &clientaddr, clientlen)<0)
-              error("ERROR in sending ACK\n");
-
-
+          send_ack(last_in_order);
           printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
           printf("sending ACK for sequence number %d again\n",last_in_order);
-
       }
 
       printf("remaining data = %d bytes \n ",remain_data);
@@ -147,18 +146,16 @@ void* udp_recieve(void* param)
 
   while(remain_data>0)
   {
-
-
-            double r = (((double) rand()) / (RAND_MAX));
-            printf(" R is %f\n",r);
+              double r = (((double) rand()) / (RAND_MAX));
+              printf(" R is %f\n",r);
               if (r<= drop_prob && (exp_seq_num!=1 ||exp_seq_num!=2) )
                   {
-                  printf("DROPPING PACKETS\n");
-                  sleep(2);
-                  continue;
+                    printf("DROPPING PACKETS\n");
+                    sleep(2);
+                    continue;
                   }
-            memset(recv_buf,'\0',sizeof(recv_buf));
-            if(recvfrom(sockfd,recv_buf , BUFSIZE , 0, &clientaddr, &clientlen)<0)
+              memset(recv_buf,'\0',sizeof(recv_buf));
+              if(recvfrom(sockfd,recv_buf , BUFSIZE , 0, &clientaddr, &clientlen)<0)
                   error("ERROR on receiving data from client \n");
               int_to_char num_char;
               num_char.bytes[0]=recv_buf[0];
@@ -168,7 +165,7 @@ void* udp_recieve(void* param)
 
               recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
               printf("rec seq num: %d\n",recv_seq_num );
-            recvbuffer_handle(recv_buf);
+              recvbuffer_handle(recv_buf);
 
 
 
@@ -185,6 +182,7 @@ int main(int argc, char **argv)
       /*
        * check command line arguments
        */
+      pthread_mutex_init(&rec_Q_mutex, NULL);
       if (argc != 2 && argc !=3) {
         printf("Arguments provided: %d\n",argc);
         fprintf(stderr, "usage: %s <port_for_server>\n", argv[0]);
@@ -192,20 +190,15 @@ int main(int argc, char **argv)
       }
       portno = atoi(argv[1]);
 
-      /*
-       * socket: create the socket
-       */
+
+      //  socket: create the socket
       if (argc==3)
        drop_prob=atof(argv[2]);
       sockfd = socket(AF_INET, SOCK_DGRAM, 0);
       if (sockfd < 0)
         error("ERROR opening socket");
 
-      /* setsockopt: Handy debugging trick that lets
-       * us rerun the server immediately after we kill it;
-       * otherwise we have to wait about 20 secs.
-       * Eliminates "ERROR on binding: Address already in use" error.
-       */
+
       optval = 1;
 
       setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR,
@@ -238,8 +231,6 @@ int main(int argc, char **argv)
             /*
              * recvfrom: receive a UDP datagram from a client
              */
-            ///////////////////////////////////////////////////
-
 
             char hello_message[3*BUFSIZE],hello[BUFSIZE];
 
@@ -313,10 +304,6 @@ int main(int argc, char **argv)
             pthread_create(&receive_thread,NULL,udp_recieve,NULL);
             pthread_join(receive_thread);
             printf("Thread Joined\n" );
-
-            int fd=open(filename, "rb");                                                // COMPUTING MD5 CHECKSUM
-
-            close(fd);
 
 
             sleep(5);

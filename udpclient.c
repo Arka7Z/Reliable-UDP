@@ -34,6 +34,10 @@
      struct data_node* next;
  }data_node;
 
+typedef struct {
+  char code[10];
+  int ack_seq_num;
+}response;
  typedef struct node
  {
      unsigned char* data;
@@ -286,7 +290,93 @@ int app_send(unsigned char* packet_buf, int bytes)
 
 }
 
-void* receive_ack(void* param)
+response parse_packets(unsigned char* buf)
+{
+  char* tokens;
+  tokens = strtok(buf,",");
+  int i=0;
+  char code[10];
+  char seq_string[BUFSIZE];
+  while (tokens != NULL && i<=1)
+  {
+
+      if(i==0)
+      {
+          strcpy(code,tokens);
+      }
+
+      else if(i==1)
+      {
+          strcpy(seq_string,tokens);
+      }
+
+      tokens = strtok (NULL, ",");
+      i++;
+  }
+
+
+  ack_seq_num = atoi(seq_string);
+  response ack;
+  strcpy(ack.code,code);
+
+  return ack;
+}
+
+void update_window(char* code)
+{
+  // ack seq num param not reqd
+
+              pthread_mutex_lock(&send_Q_mutex);
+              pthread_mutex_lock(&send_global_mutex);
+
+              if(cwnd<MSS_DATA)
+                  cwnd=MSS_DATA;
+
+              if(cwnd<=SS_Thresh)
+                {
+                    if(ack_seq_num>base)
+                      cwnd+=(MSS_DATA);
+                }
+
+              if(send_Q_head!=NULL)
+              {
+                  data_node* tmp_trav=send_Q_head;
+                  while(tmp_trav!=NULL && tmp_trav->byte_seq_num<=ack_seq_num)
+                      {
+                          data_node* del=tmp_trav;
+                          tmp_trav=tmp_trav->next;
+                          //free(del);
+                      }
+                 if(tmp_trav!=NULL)
+                      send_Q_head=tmp_trav;
+              }
+              pthread_mutex_unlock(&send_Q_mutex);
+              if(strcmp(code,"ACK")==0 && ack_seq_num == curr)
+              {
+                  base=ack_seq_num;
+                  alarm_is_on=0;
+                  if(cwnd>=SS_Thresh)
+                  if(ack_seq_num>base)
+                    cwnd+=(MSS_DATA);
+
+              }
+              else if(strcmp(code,"ACK")==0 && ack_seq_num < curr)
+              {
+                  base=ack_seq_num;
+                  alarm_is_on=1;
+                  alarm(SLEEP_VAL);
+              }
+              else
+              {
+                //  pthread_mutex_unlock(&send_global_mutex);
+                  //continue;
+                  ;
+              }
+              pthread_mutex_unlock(&send_global_mutex);
+  ;
+}
+
+void* udp_receive(void* param)
 {
   pthread_mutex_lock(&first_run_mutex);
   (void) signal(SIGALRM, mysig);
@@ -312,91 +402,20 @@ void* receive_ack(void* param)
             else
             {
                 printf("ERROR in ACK received error at seq_number ");
-                //exit(-1);
-                ;
             }
         }
         else
         {
 
-            char* tokens;
-            tokens = strtok(buf,",");
-            int i=0;
+            response ack;
+            ack=parse_packets(buf);
             char code[10];
-            char seq_string[BUFSIZE];
-            while (tokens != NULL && i<=1)
-            {
+            strcpy(code,ack.code);
 
-                if(i==0)
-                {
-                    strcpy(code,tokens);
-                }
-
-                else if(i==1)
-                {
-                    strcpy(seq_string,tokens);
-                }
-
-                tokens = strtok (NULL, ",");
-                i++;
-            }
-
-
-            ack_seq_num = atoi(seq_string);
-
-            if (cwnd==0)
-                cwnd=1;
             printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, cwnd,base);
 
-
-
-            if(cwnd<MSS_DATA)
-                cwnd=MSS_DATA;
-
-
-            pthread_mutex_lock(&send_Q_mutex);
-            pthread_mutex_lock(&send_global_mutex);
-
-            if(cwnd<=SS_Thresh)
-              {
-                  if(ack_seq_num>base)
-                    cwnd+=(MSS_DATA);
-              }
-
-            if(send_Q_head!=NULL)
-            {
-                data_node* tmp_trav=send_Q_head;
-                while(tmp_trav!=NULL && tmp_trav->byte_seq_num<=ack_seq_num)
-                    {
-                        data_node* del=tmp_trav;
-                        tmp_trav=tmp_trav->next;
-                        //free(del);
-                    }
-               if(tmp_trav!=NULL)
-                    send_Q_head=tmp_trav;
-            }
-            pthread_mutex_unlock(&send_Q_mutex);
-            if(strcmp(code,"ACK")==0 && ack_seq_num == curr)
-            {
-                base=ack_seq_num;
-                alarm_is_on=0;
-                if(cwnd>=SS_Thresh)
-                if(ack_seq_num>base)
-                  cwnd+=(MSS_DATA);
-
-            }
-            else if(strcmp(code,"ACK")==0 && ack_seq_num < curr)
-            {
-                base=ack_seq_num;
-                alarm_is_on=1;
-                alarm(SLEEP_VAL);
-            }
-            else
-            {
-                pthread_mutex_unlock(&send_global_mutex);
-                continue;
-            }
-            pthread_mutex_unlock(&send_global_mutex);
+            if(strcmp(code,"ACK")==0)
+              update_window(code);
 
         }
 
@@ -414,7 +433,7 @@ int main(int argc, char **argv)
     pthread_mutex_init(&first_run_mutex, NULL);
     pthread_mutex_init(&one_buff_present, NULL);
     pthread_t rate_control_thread;
-    pthread_t receive_ack_thread;
+    pthread_t udp_receive_thread;
     pthread_mutex_lock(&first_run_mutex);
     pthread_mutex_lock(&one_buff_present);
 
@@ -521,7 +540,7 @@ int main(int argc, char **argv)
 
     unsigned char packet_buf[BUFSIZE-8]={0};
     pthread_create(&rate_control_thread,NULL,rate_control,NULL);
-    pthread_create(&receive_ack_thread,NULL,receive_ack,NULL);
+    pthread_create(&udp_receive_thread,NULL,udp_receive,NULL);
     while(1)
         {
 
@@ -544,7 +563,7 @@ int main(int argc, char **argv)
 
             }
 
-            // LISTENING FOR THE ACK. Format: %s,%d ACK, Ack number
+
             sleep(2);
 
 
@@ -567,7 +586,7 @@ int main(int argc, char **argv)
         fclose(fp);
 
         pthread_cancel(rate_control_thread);
-        pthread_cancel(receive_ack_thread);
+        pthread_cancel(udp_receive_thread);
         close(sockfd);
 
         return 0;

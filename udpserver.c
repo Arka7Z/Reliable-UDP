@@ -1,297 +1,6 @@
-/*
- * udpserver.c - A UDP echo server
- * usage: udpserver <port_for_server>
- */
-
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <netdb.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <errno.h>
-#include <openssl/md5.h>
-#include <pthread.h>
-#include <semaphore.h>
-#define BUFSIZE 1024
-#define RECV_Q_LIMIT 30
-
-typedef struct rec_data_node{
-  unsigned char* data;
-  int bytes;
-  int byte_seq_num;
-  struct rec_data_node* next;
-}rec_data_node;
-
-typedef union
-{
-    int no;
-    char bytes[4];
-
-} int_to_char;
-typedef struct {
-  char code[10];
-  int isData;
-  int ack_seq_num;
-}response;
+ #include "quick.c"
 
 
-int sockfd; /* socket file descriptor - an ID to uniquely identify a socket by the application program */
-int portno; /* port to listen on */
-int clientlen; /* byte size of client's address */
-struct sockaddr_in serveraddr; /* server's addr */
-struct sockaddr_in clientaddr; /* client addr */
-struct hostent *hostp; /* client host info */
-char buf[BUFSIZE]; /* message buf */
-char *hostaddrp; /* dotted decimal host addr string */
-int optval; /* flag value for setsockopt */
-int n; /* message byte size */
-double drop_prob=0.003;
-
-int rec_filesize, rec_remain_data;
-
-int recv_seq_num,exp_seq_num=1,last_in_order=0;
-FILE *received_file;
-rec_data_node* rec_Q_head=NULL;
-int rec_Q_size=0;
-pthread_mutex_t rec_Q_mutex,remain_data_mutex;
-sem_t rec_full,rec_empty;
- int ack_seq_num;
-
-void error(char *msg)
-{
-  perror(msg);
-  exit(1);
-}
-
-
-
-void udp_send(unsigned char* send_buf, int sockfd, struct sockaddr_in addr,int addr_len, int size)
-{
-  if(sendto(sockfd,send_buf, size, 0, &addr, addr_len)<0)
-      error("ERROR in sending ACK\n");
-}
-
-void send_ack(int ack_num)
-{
-    char ack[BUFSIZE];
-    memset(ack,'\0',sizeof(ack));
-    sprintf(ack,"%s,%d","ACK",ack_num);
-    //if(sendto(sockfd,ack, BUFSIZE, 0, &clientaddr, clientlen)<0)
-      //  error("ERROR in sending ACK\n");
-    udp_send(ack,sockfd, clientaddr, clientlen, BUFSIZE);
-    printf("ACK for seq num: %d sent\n",ack_num );
-}
-
-
-rec_data_node appRecv()
-{
-  sem_wait(&rec_full);
-  pthread_mutex_lock(&rec_Q_mutex);
-  rec_data_node ret=*(rec_Q_head);
-  rec_Q_head=rec_Q_head->next;
-
-  pthread_mutex_unlock(&rec_Q_mutex);
-  sem_post(&rec_empty);
-  return ret;
-}
-response parse_packets(unsigned char* buf)
-{
-  char* tokens;
-  response ack;
-  if(buf[0]=='A' && buf[1]=='C' && buf[2]=='K')
-  {
-    tokens = strtok(buf,",");
-    int i=0;
-    char code[10];
-    char seq_string[BUFSIZE];
-    while (tokens != NULL && i<=1)
-    {
-
-        if(i==0)
-        {
-            strcpy(code,tokens);
-        }
-
-        else if(i==1)
-        {
-            strcpy(seq_string,tokens);
-        }
-
-        tokens = strtok (NULL, ",");
-        i++;
-    }
-
-
-    ack_seq_num = atoi(seq_string);
-
-    strcpy(ack.code,code);
-    ack.isData=0;
-    return ack;
-  }
-  else
-  {
-    printf("Data packet received in parsing\n");
-    ack.isData=1;
-    return ack;
-  }
-}
-void recvbuffer_handle(unsigned char* recv_buf)
-{
-  //printf("IN rec buffer handle\n" );
-  int ret=-1;
-  int_to_char num_char;
-  char packet_buf[BUFSIZE];
-  int bytes_received;
-
-        // getting the sequence number
-      num_char.bytes[0]=recv_buf[0];
-      num_char.bytes[1]=recv_buf[1];
-      num_char.bytes[2]=recv_buf[2];
-      num_char.bytes[3]=recv_buf[3];
-
-      recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
-
-        // getting the number of bytes
-      num_char.bytes[0]=recv_buf[4];
-      num_char.bytes[1]=recv_buf[5];
-      num_char.bytes[2]=recv_buf[6];
-      num_char.bytes[3]=recv_buf[7];
-
-      bytes_received=num_char.no;                 // BYTES RECIEVED
-
-
-      if(rec_remain_data<1016)
-      bytes_received=rec_remain_data;
-
-
-      //printf("just before seq if\n" );
-      if(recv_seq_num==exp_seq_num )
-      {
-
-          //fwrite(recv_buf+8,1,bytes_received,received_file);
-
-          // IF BUFFER FILLED DROP IT
-          //printf("HERE HERE\n" );
-          sem_wait(&rec_empty);
-          // INSERT INTO BUFFER HERE
-          pthread_mutex_lock(&rec_Q_mutex);
-          printf("packet received with sequence number = %d and bytes received = %d \n",recv_seq_num,bytes_received);
-
-          if (rec_Q_head==NULL)
-          {
-              rec_data_node* new_node=(rec_data_node*)malloc(sizeof(rec_data_node));
-              new_node->data=(unsigned char*)(malloc(sizeof(char)*(BUFSIZE-8)));
-              new_node->bytes=bytes_received;
-              new_node->byte_seq_num=exp_seq_num;
-              memcpy(new_node->data,recv_buf+8,bytes_received);
-              new_node->next=NULL;
-              rec_Q_head=new_node;
-          }
-          else
-          {
-              rec_data_node *cursor = rec_Q_head;
-              while(cursor->next != NULL)
-                      cursor = cursor->next;
-              rec_data_node* new_node=(rec_data_node*)malloc(sizeof(rec_data_node));
-              new_node->data=(unsigned char*)(malloc(sizeof(char)*(BUFSIZE-8)));
-              new_node->byte_seq_num=exp_seq_num;
-              new_node->bytes=bytes_received;
-              memcpy(new_node->data,recv_buf+8,bytes_received);
-              new_node->next=NULL;
-              cursor->next = new_node;
-
-          }
-          rec_Q_size++;
-          printf("REC q size: %d\n",rec_Q_size );
-          sem_post(&rec_full);
-          pthread_mutex_unlock(&rec_Q_mutex);
-
-
-
-          send_ack(recv_seq_num+bytes_received-1);
-          printf("Returned from send ack\n" );
-          last_in_order=recv_seq_num+bytes_received-1;
-
-          pthread_mutex_lock(&remain_data_mutex);
-          rec_remain_data -= bytes_received;
-          pthread_mutex_unlock(&remain_data_mutex);
-
-          printf("Decremented remain data\n" );
-          exp_seq_num+=bytes_received;
-      }
-      else if(recv_seq_num!=exp_seq_num )
-      {
-          send_ack(last_in_order);
-          printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          printf("sending ACK for sequence number %d again\n",last_in_order);
-      }
-      else
-      {
-          printf("in else, received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          send_ack(last_in_order);
-          printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          printf("sending ACK for sequence number %d again\n",last_in_order);
-      }
-
-      printf("remaining data = %d bytes \n ",rec_remain_data);
-
-}
-
-void* udp_recieve(void* param)
-{
-
-
-  unsigned char* recv_buf;
-  recv_buf=(unsigned char*)(malloc(sizeof(char)*BUFSIZE));                            // RECIEVE MESSAGE FROM CLIENT IN recv_buf
-  memset(recv_buf,'\0',sizeof(recv_buf));
-
-
-  while(1)
-  {
-
-              memset(recv_buf,'\0',sizeof(recv_buf));
-              if(recvfrom(sockfd,recv_buf , BUFSIZE , 0, &clientaddr, &clientlen)<0)
-                  error("ERROR on receiving data from client \n");
-              response packet;
-              packet=parse_packets(recv_buf);
-              if(!packet.isData)
-              {
-
-              }
-              else
-              {
-                double r = (((double) rand()) / (RAND_MAX));
-                printf(" R is %f\n",r);
-                if (r<= drop_prob && (exp_seq_num!=1 ||exp_seq_num!=2) )
-                    {
-                      printf("DROPPING PACKETS\n");
-                      sleep(2);
-                      continue;
-                    }
-                int_to_char num_char;
-                num_char.bytes[0]=recv_buf[0];
-                num_char.bytes[1]=recv_buf[1];
-                num_char.bytes[2]=recv_buf[2];
-                num_char.bytes[3]=recv_buf[3];
-
-                recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
-                printf("rec seq num: %d\n",recv_seq_num );
-                recvbuffer_handle(recv_buf);
-              }
-
-
-
-  }
-
-
-  printf("file received \n");
-
-}
 
 int main(int argc, char **argv)
 {
@@ -354,16 +63,18 @@ int main(int argc, char **argv)
             char ack[BUFSIZE];
 
             bzero(msg, sizeof(msg));
+            printf("66\n" );
 
             if(recvfrom(sockfd, msg, sizeof(msg) , 0, (struct sockaddr *) &clientaddr, &clientlen) < 0)
               error("ERROR on receiving hello");
-
-
-            hostaddrp = inet_ntoa(clientaddr.sin_addr);
-            if (hostaddrp == NULL)
-              error("ERROR on inet_ntoa\n");
-
-            printf("\nserver received datagram from (%s)\n", hostaddrp);
+            printf("70\n" );
+            //
+            // hostaddrp = inet_ntoa(clientaddr.sin_addr);
+            // if (hostaddrp == NULL)
+            //   error("ERROR on inet_ntoa\n");
+            //
+            // printf("\nserver received datagram from (%s)\n", hostaddrp);
+            // 
 
             char* tokens;
             tokens = strtok (msg,",");
@@ -416,9 +127,12 @@ int main(int argc, char **argv)
             pthread_mutex_unlock(&remain_data_mutex);
 
             received_file = fopen(filename, "ab");
+            sock_addr_len* sockDescriptor=(sock_addr_len*)(malloc(sizeof(sock_addr_len)));
+            sockDescriptor->addr=clientaddr;
+            sockDescriptor->len=clientlen;
 
             pthread_t receive_thread;
-            pthread_create(&receive_thread,NULL,udp_recieve,NULL);
+            pthread_create(&receive_thread,NULL,udp_receive,sockDescriptor);
 
             while(1)
             {

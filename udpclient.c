@@ -326,34 +326,44 @@ response parse_packets(unsigned char* buf)
 {
   char* tokens;
   response ack;
-  tokens = strtok(buf,",");
-  int i=0;
-  char code[10];
-  char seq_string[BUFSIZE];
-  while (tokens != NULL && i<=1)
+  if(buf[0]=='A' && buf[1]=='C' && buf[2]=='K')
   {
+    tokens = strtok(buf,",");
+    int i=0;
+    char code[10];
+    char seq_string[BUFSIZE];
+    while (tokens != NULL && i<=1)
+    {
 
-      if(i==0)
-      {
-          strcpy(code,tokens);
-      }
+        if(i==0)
+        {
+            strcpy(code,tokens);
+        }
 
-      else if(i==1)
-      {
-          strcpy(seq_string,tokens);
-      }
+        else if(i==1)
+        {
+            strcpy(seq_string,tokens);
+        }
 
-      tokens = strtok (NULL, ",");
-      i++;
+        tokens = strtok (NULL, ",");
+        i++;
+    }
+
+
+    ack_seq_num = atoi(seq_string);
+
+    strcpy(ack.code,code);
+    ack.isData=0;
+    return ack;
   }
-
-
-  ack_seq_num = atoi(seq_string);
-
-  strcpy(ack.code,code);
-
-  return ack;
+  else
+  {
+    printf("Data packet received in parsing\n");
+    ack.isData=1;
+    return ack;
+  }
 }
+
 
 void update_window(char* code)
 {
@@ -452,15 +462,18 @@ void* udp_receive(void* param)
 
             response ack;
             ack=parse_packets(buf);
-            char code[10];
-            strcpy(code,ack.code);
-
-            printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, cwnd,base);
-
-            if(strcmp(code,"ACK")==0)
+            if(!ack.isData)
             {
-              shift();
-              update_window(code);
+              char code[10];
+              strcpy(code,ack.code);
+
+              printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, cwnd,base);
+
+              if(strcmp(code,"ACK")==0)
+              {
+                shift();
+                update_window(code);
+              }
             }
 
         }

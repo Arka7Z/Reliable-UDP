@@ -33,6 +33,11 @@ typedef union
     char bytes[4];
 
 } int_to_char;
+typedef struct {
+  char code[10];
+  int isData;
+  int ack_seq_num;
+}response;
 
 
 int sockfd; /* socket file descriptor - an ID to uniquely identify a socket by the application program */
@@ -47,14 +52,15 @@ int optval; /* flag value for setsockopt */
 int n; /* message byte size */
 double drop_prob=0.003;
 
-int filesize, remain_data;
-char filename[BUFSIZE];
+int rec_filesize, rec_remain_data;
+
 int recv_seq_num,exp_seq_num=1,last_in_order=0;
 FILE *received_file;
 rec_data_node* rec_Q_head=NULL;
 int rec_Q_size=0;
 pthread_mutex_t rec_Q_mutex,remain_data_mutex;
 sem_t rec_full,rec_empty;
+ int ack_seq_num;
 
 void error(char *msg)
 {
@@ -93,7 +99,47 @@ rec_data_node appRecv()
   sem_post(&rec_empty);
   return ret;
 }
+response parse_packets(unsigned char* buf)
+{
+  char* tokens;
+  response ack;
+  if(buf[0]=='A' && buf[1]=='C' && buf[2]=='K')
+  {
+    tokens = strtok(buf,",");
+    int i=0;
+    char code[10];
+    char seq_string[BUFSIZE];
+    while (tokens != NULL && i<=1)
+    {
 
+        if(i==0)
+        {
+            strcpy(code,tokens);
+        }
+
+        else if(i==1)
+        {
+            strcpy(seq_string,tokens);
+        }
+
+        tokens = strtok (NULL, ",");
+        i++;
+    }
+
+
+    ack_seq_num = atoi(seq_string);
+
+    strcpy(ack.code,code);
+    ack.isData=0;
+    return ack;
+  }
+  else
+  {
+    printf("Data packet received in parsing\n");
+    ack.isData=1;
+    return ack;
+  }
+}
 void recvbuffer_handle(unsigned char* recv_buf)
 {
   //printf("IN rec buffer handle\n" );
@@ -119,8 +165,8 @@ void recvbuffer_handle(unsigned char* recv_buf)
       bytes_received=num_char.no;                 // BYTES RECIEVED
 
 
-      if(remain_data<1016)
-      bytes_received=remain_data;
+      if(rec_remain_data<1016)
+      bytes_received=rec_remain_data;
 
 
       //printf("just before seq if\n" );
@@ -172,7 +218,7 @@ void recvbuffer_handle(unsigned char* recv_buf)
           last_in_order=recv_seq_num+bytes_received-1;
 
           pthread_mutex_lock(&remain_data_mutex);
-          remain_data -= bytes_received;
+          rec_remain_data -= bytes_received;
           pthread_mutex_unlock(&remain_data_mutex);
 
           printf("Decremented remain data\n" );
@@ -192,7 +238,7 @@ void recvbuffer_handle(unsigned char* recv_buf)
           printf("sending ACK for sequence number %d again\n",last_in_order);
       }
 
-      printf("remaining data = %d bytes \n ",remain_data);
+      printf("remaining data = %d bytes \n ",rec_remain_data);
 
 }
 
@@ -207,26 +253,36 @@ void* udp_recieve(void* param)
 
   while(1)
   {
-              double r = (((double) rand()) / (RAND_MAX));
-              printf(" R is %f\n",r);
-              if (r<= drop_prob && (exp_seq_num!=1 ||exp_seq_num!=2) )
-                  {
-                    printf("DROPPING PACKETS\n");
-                    sleep(2);
-                    continue;
-                  }
+
               memset(recv_buf,'\0',sizeof(recv_buf));
               if(recvfrom(sockfd,recv_buf , BUFSIZE , 0, &clientaddr, &clientlen)<0)
                   error("ERROR on receiving data from client \n");
-              int_to_char num_char;
-              num_char.bytes[0]=recv_buf[0];
-              num_char.bytes[1]=recv_buf[1];
-              num_char.bytes[2]=recv_buf[2];
-              num_char.bytes[3]=recv_buf[3];
+              response packet;
+              packet=parse_packets(recv_buf);
+              if(!packet.isData)
+              {
 
-              recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
-              printf("rec seq num: %d\n",recv_seq_num );
-              recvbuffer_handle(recv_buf);
+              }
+              else
+              {
+                double r = (((double) rand()) / (RAND_MAX));
+                printf(" R is %f\n",r);
+                if (r<= drop_prob && (exp_seq_num!=1 ||exp_seq_num!=2) )
+                    {
+                      printf("DROPPING PACKETS\n");
+                      sleep(2);
+                      continue;
+                    }
+                int_to_char num_char;
+                num_char.bytes[0]=recv_buf[0];
+                num_char.bytes[1]=recv_buf[1];
+                num_char.bytes[2]=recv_buf[2];
+                num_char.bytes[3]=recv_buf[3];
+
+                recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
+                printf("rec seq num: %d\n",recv_seq_num );
+                recvbuffer_handle(recv_buf);
+              }
 
 
 
@@ -240,7 +296,7 @@ void* udp_recieve(void* param)
 int main(int argc, char **argv)
 {
 
-
+      char filename[BUFSIZE];
       pthread_mutex_init(&rec_Q_mutex, NULL);
       pthread_mutex_init(&remain_data_mutex, NULL);
       sem_init(&rec_full,0,0);
@@ -293,7 +349,7 @@ int main(int argc, char **argv)
 
             char msg[3*BUFSIZE];
             char code[BUFSIZE];
-            char filesize_string[BUFSIZE];
+            char rec_filesize_string[BUFSIZE];
 
             char ack[BUFSIZE];
 
@@ -328,15 +384,15 @@ int main(int argc, char **argv)
               }
               else if(i==2)
               {
-                // printf("filesize decoded\n" );
-                strcpy(filesize_string,tokens);
+                // printf("rec_filesize decoded\n" );
+                strcpy(rec_filesize_string,tokens);
               }
 
               tokens = strtok (NULL, ",");
               i++;
             }
 
-            filesize=atoi(filesize_string);
+            rec_filesize=atoi(rec_filesize_string);
 
             if(strcmp(code,"hello")!=0)
             {
@@ -353,10 +409,10 @@ int main(int argc, char **argv)
               error("ERROR in sending hello_ACK");
 
 
-            printf("filename : %s , filesize: %d , code: %s \n",filename, filesize, code);
+            printf("filename : %s , filesize: %d , code: %s \n",filename, rec_filesize, code);
 
             pthread_mutex_lock(&remain_data_mutex);
-            remain_data = filesize;
+            rec_remain_data = rec_filesize;
             pthread_mutex_unlock(&remain_data_mutex);
 
             received_file = fopen(filename, "ab");
@@ -367,7 +423,7 @@ int main(int argc, char **argv)
             while(1)
             {
               pthread_mutex_lock(&remain_data_mutex);
-              if(remain_data>0)
+              if(rec_remain_data>0)
               {
                 pthread_mutex_unlock(&remain_data_mutex);
                 rec_data_node data_received=appRecv();

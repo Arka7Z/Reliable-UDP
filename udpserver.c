@@ -9,7 +9,7 @@ int main(int argc, char **argv)
       pthread_mutex_init(&rec_Q_mutex, NULL);
       pthread_mutex_init(&remain_data_mutex, NULL);
       sem_init(&rec_full,0,0);
-      sem_init(&rec_empty,0,100);
+      sem_init(&rec_empty,0,RECV_Q_LIMIT);
 
       if (argc != 2 && argc !=3) {
         printf("Arguments provided: %d\n",argc);
@@ -46,6 +46,8 @@ int main(int argc, char **argv)
 
       clientlen = sizeof(clientaddr);
 
+      int rec_filesize, rec_remain_data;
+
       srand(time(0));
       while (1)
     {
@@ -74,7 +76,7 @@ int main(int argc, char **argv)
             //   error("ERROR on inet_ntoa\n");
             //
             // printf("\nserver received datagram from (%s)\n", hostaddrp);
-            // 
+            //
 
             char* tokens;
             tokens = strtok (msg,",");
@@ -136,11 +138,13 @@ int main(int argc, char **argv)
 
             while(1)
             {
-              pthread_mutex_lock(&remain_data_mutex);
+              //pthread_mutex_lock(&remain_data_mutex);
               if(rec_remain_data>0)
               {
-                pthread_mutex_unlock(&remain_data_mutex);
+
                 rec_data_node data_received=appRecv();
+                rec_remain_data -=data_received.bytes;
+                //pthread_mutex_unlock(&remain_data_mutex);
 
                 fwrite(data_received.data,1,data_received.bytes,received_file);
                 //printf("data RECIEVED: %s\n\n",data_received.data );

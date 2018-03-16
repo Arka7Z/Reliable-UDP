@@ -122,19 +122,20 @@ int main(int argc, char **argv)
     int baseptr=0,currptr=0;
     int dont_read=0;
 
-    unsigned char packet_buf[BUFSIZE-8]={0};
+
     sock_addr_len* sockDescriptor=(sock_addr_len*)(malloc(sizeof(sock_addr_len)));
     sockDescriptor->addr=serveraddr;
     sockDescriptor->len=serverlen;
     pthread_create(&rate_control_thread,NULL,rate_control,NULL);
     pthread_create(&udp_receive_thread,NULL,udp_receive,sockDescriptor);
+    unsigned char packet_buf[2*BUFSIZE-8]={0};
     while(1)
         {
 
             while(dont_read!=1)
             {
                 memset(packet_buf,0,sizeof(packet_buf));
-                nread = fread(packet_buf,1,BUFSIZE-8,fp);
+                nread = fread(packet_buf,1,2*BUFSIZE-8,fp);
                 read_count++;
                 if(nread<=0)
                     {

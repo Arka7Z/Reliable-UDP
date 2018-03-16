@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 
+
 #define BUFSIZE 1024
 #define SLEEP_VAL 2
 #define MSS 1024
@@ -80,7 +81,7 @@ int optval; /* flag value for setsockopt */
 int n; /* message byte size */
 double drop_prob=0.003;
 
-int rec_filesize, rec_remain_data;
+
 int recv_seq_num,exp_seq_num=1,last_in_order=0;
 FILE *received_file;
 rec_data_node* rec_Q_head=NULL;
@@ -94,7 +95,7 @@ int send_Q_size=0;
 int last_ack=0,last_one_ack=-1,last_two_ack=-2;
 static int alarm_fired = 0,alarm_is_on=1;
 int base=0,curr=0;
-int cwnd=3*MSS_DATA;
+int cwnd=3*MSS_DATA,fwnd=1000*MSS_DATA;
 int bytes_running=1;
 int ack_seq_num;
 int SS_Thresh= 61440;
@@ -117,7 +118,7 @@ void update_window(char* code);
 // server
 
 void udp_send(unsigned char* send_buf, int sockfd, struct sockaddr_in addr,int addr_len, int size);
-void send_ack(int ack_num);
+void send_ack(int ack_num,int broadcast_window);
 rec_data_node appRecv();
 //response parse_packets(unsigned char* buf);
 void recvbuffer_handle(unsigned char* recv_buf);

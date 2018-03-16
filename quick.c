@@ -37,7 +37,10 @@ void mysig(int sig)
         ;
     signal(SIGALRM,mysig);
 }
-
+int min(int a,int b)
+{
+  return a<b?a:b;
+}
 void* rate_control(void* param)
 {
   (void) signal(SIGALRM, mysig);
@@ -65,7 +68,7 @@ void* rate_control(void* param)
           if(current_to_send!=NULL)
           {
 
-            if(curr+current_to_send->bytes<=base+cwnd && current_to_send->sent==0)
+            if(curr+current_to_send->bytes<=base+min(cwnd,fwnd) && current_to_send->sent==0)
             {
               // send the packet
               memset(packet_buf,0,sizeof(packet_buf));
@@ -172,7 +175,35 @@ void* rate_control(void* param)
               break;
           }
           pthread_mutex_unlock(&send_Q_mutex);
+          if(fwnd==0)
+          {
+            memset(packet_buf,0,sizeof(packet_buf));
 
+            char_num.no=0;
+            packet_buf[0]=char_num.bytes[0];
+            packet_buf[1]=char_num.bytes[1];
+            packet_buf[2]=char_num.bytes[2];
+            packet_buf[3]=char_num.bytes[3];
+
+            char_num.no=0;
+            packet_buf[4]=char_num.bytes[0];
+            packet_buf[5]=char_num.bytes[1];
+            packet_buf[6]=char_num.bytes[2];
+            packet_buf[7]=char_num.bytes[3];
+            //memcpy(packet_buf+8,tmp_trav->data,BUFSIZE-8);         // packet constructed in packet_buf
+
+            printf("Sending probe data packet");
+            int_to_char num_char;
+            num_char.bytes[0]=packet_buf[4];
+            num_char.bytes[1]=packet_buf[5];
+            num_char.bytes[2]=packet_buf[6];
+            num_char.bytes[3]=packet_buf[7];
+            if(sendto (sockfd, packet_buf, BUFSIZE , 0, &serveraddr, serverlen) < 0 )
+            {
+                printf("ERROR on sending packet with seq number = %d",tmp_trav->byte_seq_num);
+                exit(-1);
+            }
+          }
 
           alarm_is_on=1;
           alarm(SLEEP_VAL);
@@ -196,13 +227,8 @@ void* rate_control(void* param)
         pthread_mutex_unlock(&send_global_mutex);
   }
 }
-
-int app_send(unsigned char* packet_buf, int bytes)
+void createPacket(unsigned char* packet_buf, int bytes)
 {
-  (void) signal(SIGALRM, mysig);
-  int ret=-1;
-
-  //add it to sender buffer
   sem_wait(&send_empty);
   pthread_mutex_lock(&send_Q_mutex);
   if (send_Q_head==NULL)
@@ -234,10 +260,51 @@ int app_send(unsigned char* packet_buf, int bytes)
   }
   send_Q_size++;
   pthread_mutex_unlock(&one_buff_present);
-  ret=1;
   printf("send q size: %d\n",send_Q_size );
   pthread_mutex_unlock(&send_Q_mutex);
   sem_post(&send_full);
+}
+
+int app_send(unsigned char* packet_buf, int bytes)
+{
+  (void) signal(SIGALRM, mysig);
+  int ret=-1;
+  unsigned char tmp_stor[BUFSIZE-8];
+
+  //add it to sender buffer
+  int tmp_bytes=bytes,read_bytes=0;
+  if(bytes>(BUFSIZE-8))
+  {
+    while (tmp_bytes>0)
+    {
+      memset(tmp_stor,'\0',sizeof(tmp_stor));
+      if (tmp_bytes>BUFSIZE-8)
+      {
+        memcpy(tmp_stor,packet_buf+read_bytes,BUFSIZE-8);
+        createPacket(tmp_stor,BUFSIZE-8);
+        tmp_bytes-=(BUFSIZE-8);
+        read_bytes+=(BUFSIZE-8);
+      }
+      else
+      {
+        memcpy(tmp_stor,packet_buf+read_bytes,tmp_bytes);
+        createPacket(tmp_stor,tmp_bytes);
+        read_bytes+=tmp_bytes;
+        tmp_bytes=0;
+
+      }
+
+
+    }
+    ret=1;
+  }
+  else
+  {
+    createPacket(packet_buf,bytes);
+    ret=1;
+    return ret;
+  }
+
 
   return ret;
 
@@ -253,7 +320,7 @@ response parse_packets(unsigned char* buf)
     int i=0;
     char code[10];
     char seq_string[BUFSIZE];
-    while (tokens != NULL && i<=1)
+    while (tokens != NULL && i<=2)
     {
 
         if(i==0)
@@ -264,6 +331,11 @@ response parse_packets(unsigned char* buf)
         else if(i==1)
         {
             strcpy(seq_string,tokens);
+        }
+        else if(i==2)
+        {
+          fwnd=atoi(tokens);
+          printf("Updat fwnd= %d\n",fwnd );
         }
 
         tokens = strtok (NULL, ",");
@@ -359,15 +431,15 @@ void udp_send(unsigned char* send_buf, int sockfd, struct sockaddr_in addr,int a
       error("ERROR in sending ACK\n");
 }
 
-void send_ack(int ack_num)
+void send_ack(int ack_num, int broadcast_window)
 {
     char ack[BUFSIZE];
     memset(ack,'\0',sizeof(ack));
-    sprintf(ack,"%s,%d","ACK",ack_num);
+    sprintf(ack,"%s,%d,%d","ACK",ack_num,broadcast_window);
     //if(sendto(sockfd,ack, BUFSIZE, 0, &clientaddr, clientlen)<0)
       //  error("ERROR in sending ACK\n");
     udp_send(ack,sockfd, clientaddr, clientlen, BUFSIZE);
-    printf("ACK for seq num: %d sent\n",ack_num );
+    printf("ACK for seq num: %d, rec_window_size: %d sent\n",ack_num, broadcast_window );
 }
 
 rec_data_node appRecv()
@@ -376,7 +448,7 @@ rec_data_node appRecv()
   pthread_mutex_lock(&rec_Q_mutex);
   rec_data_node ret=*(rec_Q_head);
   rec_Q_head=rec_Q_head->next;
-
+  rec_Q_size--;
   pthread_mutex_unlock(&rec_Q_mutex);
   sem_post(&rec_empty);
   return ret;
@@ -407,18 +479,16 @@ void recvbuffer_handle(unsigned char* recv_buf)
       bytes_received=num_char.no;                 // BYTES RECIEVED
 
 
-      if(rec_remain_data<1016)
-      bytes_received=rec_remain_data;
+      // CHANGE
+      // if(rec_remain_data<1016)
+      // bytes_received=rec_remain_data;
 
 
       //printf("just before seq if\n" );
       if(recv_seq_num==exp_seq_num )
       {
 
-          //fwrite(recv_buf+8,1,bytes_received,received_file);
 
-          // IF BUFFER FILLED DROP IT
-          //printf("HERE HERE\n" );
           sem_wait(&rec_empty);
           // INSERT INTO BUFFER HERE
           pthread_mutex_lock(&rec_Q_mutex);
@@ -455,32 +525,26 @@ void recvbuffer_handle(unsigned char* recv_buf)
 
 
 
-          send_ack(recv_seq_num+bytes_received-1);
+          send_ack(recv_seq_num+bytes_received-1,(RECV_Q_LIMIT-rec_Q_size)*MSS_DATA);
           printf("Returned from send ack\n" );
           last_in_order=recv_seq_num+bytes_received-1;
-
-          pthread_mutex_lock(&remain_data_mutex);
-          rec_remain_data -= bytes_received;
-          pthread_mutex_unlock(&remain_data_mutex);
-
-          printf("Decremented remain data\n" );
           exp_seq_num+=bytes_received;
       }
       else if(recv_seq_num!=exp_seq_num )
       {
-          send_ack(last_in_order);
+          send_ack(last_in_order,(RECV_Q_LIMIT-rec_Q_size)*MSS_DATA);
           printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
           printf("sending ACK for sequence number %d again\n",last_in_order);
       }
       else
       {
           printf("in else, received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          send_ack(last_in_order);
+          send_ack(last_in_order,(RECV_Q_LIMIT-rec_Q_size)*MSS_DATA);
           printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
           printf("sending ACK for sequence number %d again\n",last_in_order);
       }
 
-      printf("remaining data = %d bytes \n ",rec_remain_data);
+
 
 }
 

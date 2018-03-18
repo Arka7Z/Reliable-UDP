@@ -6,8 +6,9 @@ int main(int argc, char **argv)
 {
 
       char filename[BUFSIZE];
+
       pthread_mutex_init(&rec_Q_mutex, NULL);
-      pthread_mutex_init(&remain_data_mutex, NULL);
+
       sem_init(&rec_full,0,0);
       sem_init(&rec_empty,0,RECV_Q_LIMIT);
 
@@ -65,11 +66,9 @@ int main(int argc, char **argv)
             char ack[BUFSIZE];
 
             bzero(msg, sizeof(msg));
-            printf("66\n" );
 
             if(recvfrom(sockfd, msg, sizeof(msg) , 0, (struct sockaddr *) &clientaddr, &clientlen) < 0)
               error("ERROR on receiving hello");
-            printf("70\n" );
             //
             // hostaddrp = inet_ntoa(clientaddr.sin_addr);
             // if (hostaddrp == NULL)
@@ -124,27 +123,22 @@ int main(int argc, char **argv)
 
             printf("filename : %s , filesize: %d , code: %s \n",filename, rec_filesize, code);
 
-            pthread_mutex_lock(&remain_data_mutex);
             rec_remain_data = rec_filesize;
-            pthread_mutex_unlock(&remain_data_mutex);
+
 
             received_file = fopen(filename, "ab");
-            sock_addr_len* sockDescriptor=(sock_addr_len*)(malloc(sizeof(sock_addr_len)));
-            sockDescriptor->addr=clientaddr;
-            sockDescriptor->len=clientlen;
 
-            pthread_t receive_thread;
-            pthread_create(&receive_thread,NULL,udp_receive,sockDescriptor);
+            init_receiver_modules(clientaddr,clientlen);
 
             while(1)
             {
-              //pthread_mutex_lock(&remain_data_mutex);
+
               if(rec_remain_data>0)
               {
 
                 rec_data_node data_received=appRecv();
                 rec_remain_data -=data_received.bytes;
-                //pthread_mutex_unlock(&remain_data_mutex);
+
 
                 fwrite(data_received.data,1,data_received.bytes,received_file);
                 //printf("data RECIEVED: %s\n\n",data_received.data );
@@ -157,7 +151,10 @@ int main(int argc, char **argv)
 
             }
 
-            pthread_cancel(receive_thread);
+            sleep(2);
+
+            close_instance();
+            
             printf("Thread Joined\n" );
 
             fclose(received_file);

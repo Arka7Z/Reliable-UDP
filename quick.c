@@ -44,7 +44,7 @@ int min(int a,int b)
 void* rate_control(void* param)
 {
   (void) signal(SIGALRM, mysig);
-    pthread_mutex_lock(&one_buff_present);
+  //  pthread_mutex_lock(&one_buff_present); CHANGE
   unsigned char packet_buf[BUFSIZE]={0};
   int first_entry=1;
   //printf("In rate control\n");
@@ -98,7 +98,10 @@ void* rate_control(void* param)
               num_char.bytes[2]=packet_buf[6];
               num_char.bytes[3]=packet_buf[7];
               printf("Actual size sent: %d\n",num_char.no );
-              pthread_mutex_unlock(&first_run_mutex);
+
+            //  pthread_mutex_unlock(&first_run_mutex); CHANGE
+
+
               first_entry=0;
               curr+=current_to_send->bytes;
               current_to_send->sent=1;
@@ -218,13 +221,17 @@ void* rate_control(void* param)
         }
 
         pthread_mutex_lock(&send_global_mutex);
-        if(base>=filesize)
+
+        if(base>=data_to_be_sent)
+
         {
            pthread_mutex_unlock(&send_global_mutex);
-           printf("filesize-bufsize-8 is %d, base is%d\n",filesize-(BUFSIZE-8),base );
+           pthread_mutex_unlock(&send_Q_mutex);
+           printf("curr: %d, base is%d\n",curr,base );
            break;
         }
         pthread_mutex_unlock(&send_global_mutex);
+
   }
 }
 void createPacket(unsigned char* packet_buf, int bytes)
@@ -259,7 +266,7 @@ void createPacket(unsigned char* packet_buf, int bytes)
       bytes_running+=bytes;
   }
   send_Q_size++;
-  pthread_mutex_unlock(&one_buff_present);
+  // pthread_mutex_unlock(&one_buff_present); CHANGE
   printf("send q size: %d\n",send_Q_size );
   pthread_mutex_unlock(&send_Q_mutex);
   sem_post(&send_full);
@@ -351,7 +358,7 @@ response parse_packets(unsigned char* buf)
   }
   else
   {
-    printf("Data packet received in parsing\n");
+    //printf("Data packet received in parsing\n");
     ack.isData=1;
     return ack;
   }
@@ -526,7 +533,7 @@ void recvbuffer_handle(unsigned char* recv_buf)
 
 
           send_ack(recv_seq_num+bytes_received-1,(RECV_Q_LIMIT-rec_Q_size)*MSS_DATA);
-          printf("Returned from send ack\n" );
+
           last_in_order=recv_seq_num+bytes_received-1;
           exp_seq_num+=bytes_received;
       }
@@ -623,5 +630,78 @@ void* udp_receive(void* param)
 
 
   printf("file received \n");
+
+}
+void init_send_modules(int to_send)
+{
+  (void) signal(SIGALRM, mysig);
+
+  pthread_mutex_init(&send_Q_mutex, NULL);           // sender
+  pthread_mutex_init(&send_global_mutex, NULL);      // sender
+  sem_init(&send_full,0,0);                         // sender
+  sem_init(&send_empty,0,SEND_Q_LIMIT);             // sender
+  data_to_be_sent=to_send;                         // sender
+  pthread_create(&rate_control_thread,NULL,rate_control,NULL);             // sender
+  base=0;
+  curr=0;
+  alarm_fired = 0;
+  alarm_is_on=1;
+  send_Q_size=0;
+  cwnd=3*MSS_DATA;
+  fwnd=1000*MSS_DATA;
+  SS_Thresh= 61440;
+  bytes_running=1;
+  send_Q_head=NULL;
+}
+
+void init_receiver_modules(struct sockaddr_in sockaddr, int socklen)
+{
+  sock_addr_len* sockDescriptor=(sock_addr_len*)(malloc(sizeof(sock_addr_len)));    // part of recieve
+  sockDescriptor->addr=sockaddr;
+  sockDescriptor->len=socklen;
+  pthread_create(&udp_receive_thread,NULL,udp_receive,sockDescriptor);     // recieve (both have to include)
+}
+
+void wait_till_data_sent()
+{
+  pthread_join(rate_control_thread,NULL);
+}
+void close_instance()
+{
+  pthread_cancel(udp_receive_thread);
+}
+void set_connection_to(char* name, int port)
+{
+  hostname = name;
+  portno = port;
+
+  /* socket: create the socket */
+  sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sockfd < 0)
+      error("ERROR opening socket");
+
+  /* gethostbyname: get the server's DNS entry */
+  server = gethostbyname(hostname);
+  if (server == NULL)
+  {
+      fprintf(stderr,"ERROR, no such host as %s\n", hostname);
+      exit(-1);
+  }
+
+  /* build the server's Internet address */
+  memset((char *) &serveraddr,0, sizeof(serveraddr));
+  serveraddr.sin_family = AF_INET;
+  bcopy((char *)server->h_addr,
+  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+  serveraddr.sin_port = htons(portno);
+  serverlen = sizeof(serveraddr);
+  struct timeval tv;
+
+  tv.tv_sec = 1;                       // TIMEOUT IN SECONDS
+  tv.tv_usec = 0;                      // DEFAULT
+
+
+  if(setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+      printf("Cannot Set SO_RCVTIMEO for socket\n");
 
 }

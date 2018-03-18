@@ -74,9 +74,9 @@ struct sockaddr_in clientaddr; /* client addr */
 struct hostent *hostp; /* client host info */
 
 char *hostaddrp; /* dotted decimal host addr string */
- struct hostent *server;
-  int serverlen;
-   char *hostname;
+struct hostent *server;
+int serverlen;
+char *hostname;
 int optval; /* flag value for setsockopt */
 int n; /* message byte size */
 double drop_prob=0.003;
@@ -90,6 +90,10 @@ pthread_mutex_t rec_Q_mutex,remain_data_mutex;
 sem_t rec_full,rec_empty;
 
 pthread_mutex_t send_Q_mutex, send_global_mutex, first_run_mutex, one_buff_present;
+pthread_t rate_control_thread;
+pthread_t udp_receive_thread;
+
+
 data_node* send_Q_head=NULL;
 int send_Q_size=0;
 int last_ack=0,last_one_ack=-1,last_two_ack=-2;
@@ -100,7 +104,8 @@ int bytes_running=1;
 int ack_seq_num;
 int SS_Thresh= 61440;
 sem_t send_full,send_empty;
-int filesize;
+
+int data_to_be_sent;
 
 
 // client
@@ -112,6 +117,7 @@ void* rate_control(void* param);
 int app_send(unsigned char* packet_buf, int bytes);
 response parse_packets(unsigned char* buf);
 void update_window(char* code);
+void init_send_modules(int to_send);
 //void* udp_receive(void* param);
 
 
@@ -125,5 +131,9 @@ void recvbuffer_handle(unsigned char* recv_buf);
 void* udp_receive(void* param);
 //void* udp_recieve(void* param);
 
-
+// both
+void init_receiver_modules();
+void wait_till_data_sent();
+void close_instance();
+void set_connection_to(char* name, int port);
 #endif

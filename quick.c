@@ -127,7 +127,6 @@ void* rate_control(void* param)
           }
           else
             {
-
               break;
             }
         }
@@ -805,4 +804,32 @@ void set_connection_to(char* name, int port)
   if(setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
       printf("Cannot Set SO_RCVTIMEO for socket\n");
 
+}
+void setup_at(int port_number)
+{
+        portno=port_number;
+
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd < 0)
+          error("ERROR opening socket");
+
+
+        optval = 1;
+
+        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR,
+  	         (const void *)&optval , sizeof(int));
+
+
+        bzero((char *) &serveraddr, sizeof(serveraddr));
+        serveraddr.sin_family = AF_INET;
+        serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        serveraddr.sin_port = htons((unsigned short)portno);
+
+
+        if (bind(sockfd, (struct sockaddr *) &serveraddr,
+  	       sizeof(serveraddr)) < 0)
+          error("ERROR on binding");
+
+
+        clientlen = sizeof(clientaddr);
 }

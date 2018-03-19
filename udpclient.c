@@ -4,10 +4,6 @@
 int main(int argc, char **argv)
 {
 
-
-
-
-
     int read_count=0;
 
 
@@ -19,37 +15,7 @@ int main(int argc, char **argv)
        fprintf(stderr,"usage: %s <hostname> <port>\n", argv[0]);
        exit(0);
     }
-    // hostname = argv[1];
-    // portno = atoi(argv[2]);
-    //
-    // /* socket: create the socket */
-    // sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    // if (sockfd < 0)
-    //     error("ERROR opening socket");
-    //
-    // /* gethostbyname: get the server's DNS entry */
-    // server = gethostbyname(hostname);
-    // if (server == NULL)
-    // {
-    //     fprintf(stderr,"ERROR, no such host as %s\n", hostname);
-    //     exit(-1);
-    // }
-    //
-    // /* build the server's Internet address */
-    // memset((char *) &serveraddr,0, sizeof(serveraddr));
-    // serveraddr.sin_family = AF_INET;
-    // bcopy((char *)server->h_addr,
-	  // (char *)&serveraddr.sin_addr.s_addr, server->h_length);
-    // serveraddr.sin_port = htons(portno);
-    // serverlen = sizeof(serveraddr);
-    // struct timeval tv;
-    //
-    // tv.tv_sec = 1;                       // TIMEOUT IN SECONDS
-    // tv.tv_usec = 0;                      // DEFAULT
-    //
-    //
-    // if(setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-    //     printf("Cannot Set SO_RCVTIMEO for socket\n");
+
 
     set_connection_to(argv[1],atoi(argv[2]));
 

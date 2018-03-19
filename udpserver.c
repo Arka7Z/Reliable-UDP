@@ -17,35 +17,14 @@ int main(int argc, char **argv)
         fprintf(stderr, "usage: %s <port_for_server>\n", argv[0]);
         exit(1);
       }
-      portno = atoi(argv[1]);
+      //portno = atoi(argv[1]);
 
 
       //  socket: create the socket
       if (argc==3)
        drop_prob=atof(argv[2]);
-      sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-      if (sockfd < 0)
-        error("ERROR opening socket");
 
-
-      optval = 1;
-
-      setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR,
-	         (const void *)&optval , sizeof(int));
-
-
-      bzero((char *) &serveraddr, sizeof(serveraddr));
-      serveraddr.sin_family = AF_INET;
-      serveraddr.sin_addr.s_addr = htonl(INADDR_ANY);
-      serveraddr.sin_port = htons((unsigned short)portno);
-
-
-      if (bind(sockfd, (struct sockaddr *) &serveraddr,
-	       sizeof(serveraddr)) < 0)
-        error("ERROR on binding");
-
-
-      clientlen = sizeof(clientaddr);
+      setup_at(atoi(argv[1]));
 
       int rec_filesize, rec_remain_data;
 

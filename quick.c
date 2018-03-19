@@ -50,91 +50,64 @@ void* rate_control(void* param)
 {
   (void) signal(SIGALRM, mysig);
   //  pthread_mutex_lock(&one_buff_present); CHANGE
-  unsigned char packet_buf[BUFSIZE]={0};
+  unsigned char packet_buf[BUFSIZE-8]={0};
   int first_entry=1;
-  //printf("In rate control\n");
+  int to_send_bytes,to_send_seq_num;
   int_to_char char_num;
 
 
   //alarm_fired=0;
   while(1)
   {
-
-    pthread_mutex_lock(&send_Q_mutex);
-    data_node* current_to_send=send_Q_head;
-    pthread_mutex_unlock(&send_Q_mutex);
         pthread_mutex_lock(&send_global_mutex);
-        pthread_mutex_lock(&send_Q_mutex);
-
-
         while((1 && !alarm_fired) || first_entry)
         {
 
-          if(current_to_send!=NULL)
+          pthread_mutex_lock(&send_cond_mutex);
+
+
+          if(send_vec.size()!=0 && min(cwnd,fwnd)>0)
           {
 
-            if(curr+current_to_send->bytes<=base+min(cwnd,fwnd) && current_to_send->sent==0)
-            {
-              // send the packet
-              memset(packet_buf,0,sizeof(packet_buf));
+                if(curr-base<=min(cwnd,fwnd))
+                {
+                  // send the packet
+                  memset(packet_buf,0,sizeof(packet_buf));
+                  to_send_bytes=min(send_vec.size(),min(cwnd,fwnd));
+                  to_send_bytes=min(to_send_bytes,BUFSIZE-8);
+                  //transfer data to a packet and invoke createPacketAndSend
+                  std::copy(send_vec.begin(),send_vec.begin()+to_send_bytes,packet_buf);
+                  send_vec.erase(send_vec.begin(),send_vec.begin()+to_send_bytes);
+                  printf("Sending packet\n" );
+                  createPacketAndSend(packet_buf,to_send_bytes,curr+1);
+                  printf("Packet sent with seq num %d, size %d\n",curr+1, to_send_bytes );
 
-              char_num.no=curr+1;
-              packet_buf[0]=char_num.bytes[0];
-              packet_buf[1]=char_num.bytes[1];
-              packet_buf[2]=char_num.bytes[2];
-              packet_buf[3]=char_num.bytes[3];
-
-              char_num.no=current_to_send->bytes;
-              packet_buf[4]=char_num.bytes[0];
-              packet_buf[5]=char_num.bytes[1];
-              packet_buf[6]=char_num.bytes[2];
-              packet_buf[7]=char_num.bytes[3];
-              memcpy(packet_buf+8,current_to_send->data,BUFSIZE-8);         // packet constructed in packet_buf
-
-              if(sendto (sockfd, packet_buf, BUFSIZE , 0,(struct sockaddr*) &serveraddr, serverlen) < 0 )
-              {
-                  printf("ERROR on sending packet with seq number = %d",curr+1);
-                  exit(-1);
-              }
-              printf("Packet sent with seq num %d, size %d\n",curr+1, char_num.no );
-              int_to_char num_char;
-              num_char.bytes[0]=packet_buf[4];
-              num_char.bytes[1]=packet_buf[5];
-              num_char.bytes[2]=packet_buf[6];
-              num_char.bytes[3]=packet_buf[7];
-              printf("Actual size sent: %d\n",num_char.no );
-
-            //  pthread_mutex_unlock(&first_run_mutex); CHANGE
+                  pthread_cond_signal(&send_cond_var);
+                  pthread_mutex_unlock(&send_cond_mutex);
+                  first_entry=0;
+                  curr+=to_send_bytes;
 
 
-              first_entry=0;
-              curr+=current_to_send->bytes;
-              current_to_send->sent=1;
-              current_to_send=current_to_send->next;
-
+                }
+                else
+                {
+                    // START TIMER
+                      alarm_is_on=1;
+                      alarm(SLEEP_VAL);
+                      pthread_mutex_unlock(&send_cond_mutex);
+                      break;
+                }
             }
-            else
-            {
-              if(curr-base==cwnd || curr+current_to_send->bytes>base+cwnd)
-              // START TIMER
-              {
-
-              alarm_is_on=1;
-              alarm(SLEEP_VAL);
-              }
-              break;
-            }
-          }
           else
             {
+
+              pthread_mutex_unlock(&send_cond_mutex);
               break;
             }
         }
-        pthread_mutex_unlock(&send_global_mutex);
-        pthread_mutex_unlock(&send_Q_mutex);
 
-        // IN CASE OF TIMEOUT
-        //printf("checking for timeout: %d\n",alarm_fired );
+        pthread_mutex_unlock(&send_global_mutex);
+
         if(alarm_fired)
         {
 
@@ -148,30 +121,31 @@ void* rate_control(void* param)
             if(tmp_trav->byte_seq_num<curr)
             {
               //send this packet
-
-              memset(packet_buf,0,sizeof(packet_buf));
+              unsigned char packet[BUFSIZE];
+              memset(packet,'\0',sizeof(packet));
 
               char_num.no=tmp_trav->byte_seq_num;
-              packet_buf[0]=char_num.bytes[0];
-              packet_buf[1]=char_num.bytes[1];
-              packet_buf[2]=char_num.bytes[2];
-              packet_buf[3]=char_num.bytes[3];
+              packet[0]=char_num.bytes[0];
+              packet[1]=char_num.bytes[1];
+              packet[2]=char_num.bytes[2];
+              packet[3]=char_num.bytes[3];
 
               char_num.no=tmp_trav->bytes;
-              packet_buf[4]=char_num.bytes[0];
-              packet_buf[5]=char_num.bytes[1];
-              packet_buf[6]=char_num.bytes[2];
-              packet_buf[7]=char_num.bytes[3];
-              memcpy(packet_buf+8,tmp_trav->data,BUFSIZE-8);         // packet constructed in packet_buf
+              packet[4]=char_num.bytes[0];
+              packet[5]=char_num.bytes[1];
+              packet[6]=char_num.bytes[2];
+              packet[7]=char_num.bytes[3];
+              memcpy(packet+8,tmp_trav->data,BUFSIZE-8);         // packet constructed in packet_buf
 
               printf("Retransmitting packet with byte seq num: %d, size: %d\n",tmp_trav->byte_seq_num,tmp_trav->bytes);
+              retransmitted++;
               int_to_char num_char;
-              num_char.bytes[0]=packet_buf[4];
-              num_char.bytes[1]=packet_buf[5];
-              num_char.bytes[2]=packet_buf[6];
-              num_char.bytes[3]=packet_buf[7];
+              num_char.bytes[0]=packet[4];
+              num_char.bytes[1]=packet[5];
+              num_char.bytes[2]=packet[6];
+              num_char.bytes[3]=packet[7];
               printf("Actual size sent: %d\n",num_char.no );
-              if(sendto (sockfd, packet_buf, BUFSIZE , 0,(struct sockaddr*) &serveraddr, serverlen) < 0 )
+              if(sendto (sockfd, packet, BUFSIZE , 0,(struct sockaddr*) &serveraddr, serverlen) < 0 )
               {
                   printf("ERROR on sending packet with seq number = %d",tmp_trav->byte_seq_num);
                   exit(-1);
@@ -232,24 +206,28 @@ void* rate_control(void* param)
            pthread_mutex_unlock(&send_global_mutex);
            pthread_mutex_unlock(&send_Q_mutex);
            printf("curr: %d, base is%d\n",curr,base );
+           printf("retransmitted: %d\n",retransmitted );
            break;
         }
         pthread_mutex_unlock(&send_global_mutex);
 
   }
 }
-void createPacket(unsigned char* packet_buf, int bytes)
+void createPacketAndSend(unsigned char* packet_buf, int bytes,int to_send_seq_num)
 {
-  sem_wait(&send_empty);
+
   pthread_mutex_lock(&send_Q_mutex);
+
   if (send_Q_head==NULL)
   {
       data_node* new_node=(data_node*)malloc(sizeof(data_node));
       new_node->data=(unsigned char*)(malloc(sizeof(char)*(BUFSIZE-8)));
       new_node->bytes=bytes;
-      new_node->byte_seq_num=bytes_running;
-      new_node->sent=0;
+      new_node->byte_seq_num=to_send_seq_num;
+      new_node->sent=1;
+      printf("226\n" );
       memcpy(new_node->data,packet_buf,bytes);
+            printf("227\n" );
       new_node->next=NULL;
       send_Q_head=new_node;
       bytes_running+=bytes;
@@ -261,62 +239,56 @@ void createPacket(unsigned char* packet_buf, int bytes)
               cursor = cursor->next;
       data_node* new_node=(data_node*)malloc(sizeof(data_node));
       new_node->data=(unsigned char*)(malloc(sizeof(char)*(BUFSIZE-8)));
-      new_node->byte_seq_num=bytes_running;
+      new_node->byte_seq_num=to_send_seq_num;
       new_node->bytes=bytes;
-      new_node->sent=0;
+      new_node->sent=1;
       memcpy(new_node->data,packet_buf,bytes);
       new_node->next=NULL;
       cursor->next = new_node;
       bytes_running+=bytes;
   }
   send_Q_size++;
-  // pthread_mutex_unlock(&one_buff_present); CHANGE
-  printf("send q size: %d\n",send_Q_size );
+  //printf("send q size: %d\n",send_Q_size );
+
+
+                    unsigned char packet[BUFSIZE];
+
+                    int_to_char char_num;
+                    char_num.no=to_send_seq_num;
+                    packet[0]=char_num.bytes[0];
+                    packet[1]=char_num.bytes[1];
+                    packet[2]=char_num.bytes[2];
+                    packet[3]=char_num.bytes[3];
+
+                    char_num.no=bytes;
+                    packet[4]=char_num.bytes[0];
+                    packet[5]=char_num.bytes[1];
+                    packet[6]=char_num.bytes[2];
+                    packet[7]=char_num.bytes[3];
+                    memcpy(packet+8,packet_buf,BUFSIZE-8);
+
+                    if(sendto (sockfd, packet, BUFSIZE , 0,(struct sockaddr*) &serveraddr, serverlen) < 0 )
+                    {
+                        printf("ERROR on sending packet with seq number = %d",curr+1);
+                        exit(-1);
+                    }
   pthread_mutex_unlock(&send_Q_mutex);
-  sem_post(&send_full);
+
 }
 
 int app_send(unsigned char* packet_buf, int bytes)
 {
-  (void) signal(SIGALRM, mysig);
   int ret=-1;
-  unsigned char tmp_stor[BUFSIZE-8];
-
-  //add it to sender buffer
-  int tmp_bytes=bytes,read_bytes=0;
-  if(bytes>(BUFSIZE-8))
+  pthread_mutex_lock(&send_cond_mutex);   // change
+  while(bytes>SEND_Q_LIMIT*MSS_DATA-send_vec.size())
   {
-    while (tmp_bytes>0)
-    {
-      memset(tmp_stor,'\0',sizeof(tmp_stor));
-      if (tmp_bytes>BUFSIZE-8)
-      {
-        memcpy(tmp_stor,packet_buf+read_bytes,BUFSIZE-8);
-        createPacket(tmp_stor,BUFSIZE-8);
-        tmp_bytes-=(BUFSIZE-8);
-        read_bytes+=(BUFSIZE-8);
-      }
-      else
-      {
-        memcpy(tmp_stor,packet_buf+read_bytes,tmp_bytes);
-        createPacket(tmp_stor,tmp_bytes);
-        read_bytes+=tmp_bytes;
-        tmp_bytes=0;
-
-      }
-
-
-    }
-    ret=1;
+    pthread_cond_wait(&send_cond_var,&send_cond_mutex);
   }
-  else
-  {
-    createPacket(packet_buf,bytes);
-    ret=1;
-    return ret;
-  }
-
-
+  vector<unsigned char> tmp_vec(packet_buf,packet_buf+bytes);
+  send_vec.insert(send_vec.begin()+send_vec.size(),tmp_vec.begin(),tmp_vec.end());
+  printf("Inserted in send buffer, size of send buff: %d\n",send_vec.size() );
+  pthread_mutex_unlock(&send_cond_mutex);
+  ret=1;
   return ret;
 
 }
@@ -397,13 +369,16 @@ void update_window(char* code)
               if(send_Q_head!=NULL)
               {
                   data_node* tmp_trav=send_Q_head;
-                  while(tmp_trav!=NULL && tmp_trav->byte_seq_num<=ack_seq_num)
+                  while(tmp_trav!=NULL )
                       {
-                          data_node* del=tmp_trav;
-                          tmp_trav=tmp_trav->next;
-                          sem_post(&send_empty);
-                          send_Q_size--;
-                          //free(del);
+                        if(tmp_trav->byte_seq_num<=ack_seq_num)
+                          {
+                            data_node* del=tmp_trav;
+                            tmp_trav=tmp_trav->next;
+                            send_Q_size--;
+                          }
+                          else
+                          break;
                       }
                  if(tmp_trav!=NULL)
                       send_Q_head=tmp_trav;
@@ -733,7 +708,8 @@ void* udp_receive(void* param)
 void init_send_modules(int to_send)
 {
   (void) signal(SIGALRM, mysig);
-
+  pthread_mutex_init(&send_cond_mutex,NULL);
+  pthread_cond_init(&send_cond_var,NULL);
   pthread_mutex_init(&send_Q_mutex, NULL);           // sender
   pthread_mutex_init(&send_global_mutex, NULL);      // sender
   sem_init(&send_full,0,0);                         // sender

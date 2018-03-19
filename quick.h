@@ -98,6 +98,9 @@ pthread_t udp_receive_thread;
 pthread_mutex_t cond_mutex;
 pthread_cond_t cond_var;
 
+pthread_mutex_t send_cond_mutex;
+pthread_cond_t send_cond_var;
+
 
 data_node* send_Q_head=NULL;
 int send_Q_size=0;
@@ -113,10 +116,11 @@ sem_t send_full,send_empty;
 int data_to_be_sent;
 
 std::vector<unsigned char> recv_vec;
-
+std::vector<unsigned char> send_vec;
+int retransmitted=0;
 
 // client
-
+void createPacketAndSend(unsigned char* packet_buf, int bytes,int to_send_seq_num);
 void shift();
 int check_for_triple_duplicate();
 void mysig(int sig);

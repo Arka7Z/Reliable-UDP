@@ -67,7 +67,7 @@ int main(int argc, char **argv)
 
             bzero(msg, sizeof(msg));
 
-            if(recvfrom(sockfd, msg, sizeof(msg) , 0, (struct sockaddr *) &clientaddr, &clientlen) < 0)
+            if(recvfrom(sockfd, msg, sizeof(msg) , 0, (struct sockaddr *) &clientaddr,(socklen_t*) &clientlen) < 0)
               error("ERROR on receiving hello");
             //
             // hostaddrp = inet_ntoa(clientaddr.sin_addr);
@@ -117,7 +117,7 @@ int main(int argc, char **argv)
 
             printf(" \n sending %s  \n ",ack);
 
-            if(sendto (sockfd, ack, strlen(ack), 0, &clientaddr, clientlen) < 0)
+            if(sendto (sockfd, ack, strlen(ack), 0, (struct sockaddr*) &clientaddr, clientlen) < 0)
               error("ERROR in sending hello_ACK");
 
 
@@ -135,8 +135,11 @@ int main(int argc, char **argv)
 
               if(rec_remain_data>0)
               {
-
-                rec_data_node data_received=appRecv();
+                rec_data_node data_received;
+                if(rec_remain_data>BUFSIZE)
+                  data_received=changedappRecv(BUFSIZE);
+                else
+                  data_received=changedappRecv(rec_remain_data);
                 rec_remain_data -=data_received.bytes;
 
 
@@ -154,7 +157,7 @@ int main(int argc, char **argv)
             sleep(2);
 
             close_instance();
-            
+
             printf("Thread Joined\n" );
 
             fclose(received_file);

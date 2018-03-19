@@ -1,7 +1,7 @@
 
 #ifndef _insertion_sort_h
 #define _insertion_sort_h
-
+#include <bits/stdc++.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +25,8 @@
 #define MSS_DATA 1016
 #define SEND_Q_LIMIT 50
 #define RECV_Q_LIMIT 30
+
+using namespace std;
 
 typedef struct{
   struct sockaddr_in addr;
@@ -93,6 +95,9 @@ pthread_mutex_t send_Q_mutex, send_global_mutex, first_run_mutex, one_buff_prese
 pthread_t rate_control_thread;
 pthread_t udp_receive_thread;
 
+pthread_mutex_t cond_mutex;
+pthread_cond_t cond_var;
+
 
 data_node* send_Q_head=NULL;
 int send_Q_size=0;
@@ -106,6 +111,8 @@ int SS_Thresh= 61440;
 sem_t send_full,send_empty;
 
 int data_to_be_sent;
+
+std::vector<unsigned char> recv_vec;
 
 
 // client

@@ -79,13 +79,13 @@ int main(int argc, char **argv)
     int ack_seq_num=0, to_trans=(filesize/1016)+1;
     while(1)
     {
-        if( sendto (sockfd, hello_message, strlen(hello_message), 0, &serveraddr, serverlen) < 0 )
+        if( sendto (sockfd, hello_message, strlen(hello_message), 0,(struct sockaddr*) &serveraddr, serverlen) < 0 )
             error("ERROR in hello");
         printf("waiting for hello_ACK\n");
 
             memset(buf,'\0',sizeof(buf));
 
-        if(recvfrom(sockfd, buf, sizeof(buf),0,&serveraddr, &serverlen) < 0)
+        if(recvfrom(sockfd, buf, sizeof(buf),0,(struct sockaddr*)&serveraddr,(socklen_t*) &serverlen) < 0)
         {
              error("ERROR in hello ACK");
         }

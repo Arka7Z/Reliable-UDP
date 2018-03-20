@@ -67,6 +67,12 @@ typedef struct node
     struct node* next;
 }node;
 
+typedef struct {
+  string filename;
+  int filesize;
+  int number_of_packets;
+}filedata;
+
 
 int sockfd; /* socket file descriptor - an ID to uniquely identify a socket by the application program */
 int portno; /* port to listen on */
@@ -85,7 +91,6 @@ double drop_prob=0.003;
 
 
 int recv_seq_num,exp_seq_num=1,last_in_order=0;
-FILE *received_file;
 rec_data_node* rec_Q_head=NULL;
 int rec_Q_size=0;
 pthread_mutex_t rec_Q_mutex,remain_data_mutex;

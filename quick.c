@@ -809,3 +809,118 @@ void setup_at(int port_number)
 
         clientlen = sizeof(clientaddr);
 }
+
+int send_filename_and_size(string filename_str)
+{
+  char hello_message[BUFSIZE],buf[BUFSIZE];
+  int filesize;
+
+  memset(buf,'\0',sizeof(buf));
+
+
+  struct stat st;
+  stat(filename_str.c_str(), &st);
+  filesize = st.st_size;
+
+  sprintf(hello_message,"%s,%s,%d,%d","hello",filename_str.c_str(),filesize,(int)ceil(filesize/1016));
+  memset(buf,'\0',sizeof(buf));
+  printf("hello_message: %s\n",hello_message );
+
+
+
+  while(1)
+  {
+      if( sendto (sockfd, hello_message, strlen(hello_message), 0,(struct sockaddr*) &serveraddr, serverlen) < 0 )
+          error("ERROR in hello");
+      printf("waiting for hello_ACK\n");
+
+          memset(buf,'\0',sizeof(buf));
+
+      if(recvfrom(sockfd, buf, sizeof(buf),0,(struct sockaddr*)&serveraddr,(socklen_t*) &serverlen) < 0)
+      {
+           error("ERROR in hello ACK");
+      }
+      printf("\n");
+
+      if(strcmp(buf,"hello_ACK") == 0)
+      {
+          printf("\n hello ACK received \n" );
+          break;
+      }
+  }
+  return filesize;
+
+
+}
+
+filedata getfilename_and_size()
+{
+    filedata metadata;
+  char hello_message[BUFSIZE],hello[BUFSIZE];
+
+  char msg[BUFSIZE];
+  char code[BUFSIZE];
+  char rec_filesize_string[BUFSIZE];
+  string filename;
+  char ack[BUFSIZE];
+  int number_of_packets;
+  while(1)
+  {
+
+
+  bzero(msg, sizeof(msg));
+
+  if(recvfrom(sockfd, msg, sizeof(msg) , 0, (struct sockaddr *) &clientaddr,(socklen_t*) &clientlen) < 0)
+    error("ERROR on receiving hello");
+  char* tokens;
+  tokens = strtok (msg,",");
+  int i=0;
+  while (tokens != NULL && i<=2)
+  {
+
+      if(i==0)
+    {
+      //printf("code decoded \t");
+      strcpy(code,tokens);
+    }
+
+    else if(i==1)
+    {
+      // printf("filename decoded\t" );
+      filename=string(tokens);
+      cout<<"filename is : "<<filename<<endl;
+    }
+    else if(i==2)
+    {
+      // printf("rec_filesize decoded\n" );
+      metadata.filesize=atoi(tokens);
+    }
+    else if(i==3)
+    {
+      number_of_packets=atoi(tokens);
+    }
+
+    tokens = strtok (NULL, ",");
+    i++;
+  }
+
+  if(strcmp(code,"hello")!=0)
+  {
+    printf("\n Not a new Connection Request, restarting\n");
+    continue;
+  }
+
+  bzero(ack,sizeof(ack));
+  strcpy(ack,"hello_ACK\0");
+
+  printf(" \n sending %s  \n ",ack);
+
+  if(sendto (sockfd, ack, strlen(ack), 0, (struct sockaddr*) &clientaddr, clientlen) < 0)
+    error("ERROR in sending hello_ACK");
+    break;
+  }
+
+  metadata.filename=filename;
+  metadata.number_of_packets=number_of_packets;
+  return metadata;
+}

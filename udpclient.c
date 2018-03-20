@@ -19,51 +19,16 @@ int main(int argc, char **argv)
 
     set_connection_to(argv[1],atoi(argv[2]));
 
-    char hello_message[3*BUFSIZE],hello[BUFSIZE];
+    printf("Enter file name\n" );
+    string filename_str;
+    cin>>filename_str;
 
-    strcpy(hello,"hello\0");
-
-
-
-    memset(buf,'\0',sizeof(buf));
-
-    int filesize;
-    printf("Please enter the file name: ");
-    scanf("%s",buf);
-    char filename[1000];
-    strcpy(filename,buf);
-    struct stat st;
-    stat(buf, &st);
-    filesize = st.st_size;
-    FILE* fp = fopen(buf, "rb");
-    sprintf(hello_message,"%s,%s,%d",hello,buf,filesize);
-    memset(buf,'\0',sizeof(buf));
+    int filesize=send_filename_and_size(filename_str);
 
 
 
-
+    FILE* fp = fopen(filename_str.c_str(), "rb");
     int ack_seq_num=0, to_trans=(filesize/1016)+1;
-    while(1)
-    {
-        if( sendto (sockfd, hello_message, strlen(hello_message), 0,(struct sockaddr*) &serveraddr, serverlen) < 0 )
-            error("ERROR in hello");
-        printf("waiting for hello_ACK\n");
-
-            memset(buf,'\0',sizeof(buf));
-
-        if(recvfrom(sockfd, buf, sizeof(buf),0,(struct sockaddr*)&serveraddr,(socklen_t*) &serverlen) < 0)
-        {
-             error("ERROR in hello ACK");
-        }
-        printf("\n");
-
-        if(strcmp(buf,"hello_ACK") == 0)
-        {
-            printf("\n hello ACK received \n" );
-            break;
-        }
-    }
-
     int  remain_data = filesize,sent_bytes,nread,dont_read=0;
 
 

@@ -5,7 +5,7 @@
 int main(int argc, char **argv)
 {
 
-      char filename[BUFSIZE];
+      string filename;
 
       pthread_mutex_init(&rec_Q_mutex, NULL);
 
@@ -36,76 +36,16 @@ int main(int argc, char **argv)
              * recvfrom: receive a UDP datagram from a client
              */
 
-            char hello_message[3*BUFSIZE],hello[BUFSIZE];
-
-            char msg[3*BUFSIZE];
-            char code[BUFSIZE];
-            char rec_filesize_string[BUFSIZE];
-
-            char ack[BUFSIZE];
-
-            bzero(msg, sizeof(msg));
-
-            if(recvfrom(sockfd, msg, sizeof(msg) , 0, (struct sockaddr *) &clientaddr,(socklen_t*) &clientlen) < 0)
-              error("ERROR on receiving hello");
-            //
-            // hostaddrp = inet_ntoa(clientaddr.sin_addr);
-            // if (hostaddrp == NULL)
-            //   error("ERROR on inet_ntoa\n");
-            //
-            // printf("\nserver received datagram from (%s)\n", hostaddrp);
-            //
-
-            char* tokens;
-            tokens = strtok (msg,",");
-            int i=0;
-            while (tokens != NULL && i<=2)
-            {
-
-              if(i==0)
-              {
-                //printf("code decoded \t");
-                strcpy(code,tokens);
-              }
-
-              else if(i==1)
-              {
-                // printf("filename decoded\t" );
-                strcpy(filename,tokens);
-              }
-              else if(i==2)
-              {
-                // printf("rec_filesize decoded\n" );
-                strcpy(rec_filesize_string,tokens);
-              }
-
-              tokens = strtok (NULL, ",");
-              i++;
-            }
-
-            rec_filesize=atoi(rec_filesize_string);
-
-            if(strcmp(code,"hello")!=0)
-            {
-              printf("\n Not a new Connection Request, restarting\n");
-              continue;
-            }
-
-            bzero(ack,sizeof(ack));
-            strcpy(ack,"hello_ACK\0");
-
-            printf(" \n sending %s  \n ",ack);
-
-            if(sendto (sockfd, ack, strlen(ack), 0, (struct sockaddr*) &clientaddr, clientlen) < 0)
-              error("ERROR in sending hello_ACK");
+            filedata metadata=getfilename_and_size();
+            filename=metadata.filename;
+            rec_filesize=metadata.filesize;
 
 
-            printf("filename : %s , filesize: %d , code: %s \n",filename, rec_filesize, code);
-
+            printf("filename : %s , filesize: %d \n",filename.c_str(), rec_filesize);
             rec_remain_data = rec_filesize;
 
 
-            received_file = fopen(filename, "ab");
+            FILE *received_file= fopen(filename.c_str(), "ab");
 
             init_receiver_modules(clientaddr,clientlen);
 

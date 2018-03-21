@@ -67,14 +67,14 @@ void* rate_control(void* param)
           pthread_mutex_lock(&send_cond_mutex);
 
 
-          if(send_vec.size()!=0 && min(cwnd,fwnd)>0)
+          if(send_vec.size()!=0 && min((int)cwnd,fwnd)>0)
           {
 
-                if(curr-base<=min(cwnd,fwnd))
+                if(curr-base<=min((int)cwnd,fwnd))
                 {
                   // send the packet
                   memset(packet_buf,0,sizeof(packet_buf));
-                  to_send_bytes=min(send_vec.size(),min(cwnd,fwnd));
+                  to_send_bytes=min(send_vec.size(),min((int)cwnd,fwnd));
                   to_send_bytes=min(to_send_bytes,BUFSIZE-8);
                   //transfer data to a packet and invoke createPacketAndSend
                   std::copy(send_vec.begin(),send_vec.begin()+to_send_bytes,packet_buf);
@@ -195,9 +195,9 @@ void* rate_control(void* param)
 
 
           printf("UPDATING CWND AND SS_Thresh\n" );
-          cwnd=MSS_DATA;
-          if(SS_Thresh>1016)
-            SS_Thresh=SS_Thresh/2;
+
+            SS_Thresh=(int)(cwnd/2);
+            cwnd=MSS_DATA;
           // change
           alarm_fired=0;
         }
@@ -229,9 +229,7 @@ void createPacketAndSend(unsigned char* packet_buf, int bytes,int to_send_seq_nu
       new_node->bytes=bytes;
       new_node->byte_seq_num=to_send_seq_num;
       new_node->sent=1;
-      printf("226\n" );
       memcpy(new_node->data,packet_buf,bytes);
-            printf("227\n" );
       new_node->next=NULL;
       send_Q_head=new_node;
       bytes_running+=bytes;
@@ -355,23 +353,26 @@ void update_window(char* code)
               pthread_mutex_lock(&send_global_mutex);
               pthread_mutex_lock(&send_Q_mutex);
 
-              if(cwnd<MSS_DATA)
+              if((int)cwnd<MSS_DATA)
                   cwnd=MSS_DATA;
               if(!( (ack_seq_num==last_ack && last_ack==last_one_ack && last_two_ack==last_one_ack && last_two_ack==ack_seq_num)))
               {
 
-
-                if(cwnd<=SS_Thresh)
+                // NOT TRIPLE DUPLICATE ACK
+                if((int)cwnd<=SS_Thresh)
                   {
                       if(ack_seq_num>base)
                         cwnd+=(MSS_DATA);
                   }
+                  if((int)cwnd>=SS_Thresh)
+                    if(ack_seq_num>base)
+                      cwnd+=(double)(MSS_DATA*MSS_DATA)/cwnd;
               }
               else
               {
-                if(SS_Thresh>1016)
-                  SS_Thresh=SS_Thresh/2;
-                cwnd=SS_Thresh;
+                // TRIPLE DUPLICATE ACK
+                  SS_Thresh=(int)(cwnd/2);
+                  cwnd=SS_Thresh;
               }
 
               if(send_Q_head!=NULL)
@@ -396,9 +397,9 @@ void update_window(char* code)
               {
                   base=ack_seq_num;
                   alarm_is_on=0;
-                  if(cwnd>=SS_Thresh)
-                  if(ack_seq_num>base)
-                    cwnd+=(MSS_DATA);
+                  // if(cwnd>=SS_Thresh)
+                  //   if(ack_seq_num>base)
+                  //     cwnd+=(MSS_DATA);
 
               }
               else if(strcmp(code,"ACK")==0 && ack_seq_num < curr)
@@ -492,12 +493,8 @@ void recvbuffer_handle(unsigned char* recv_buf,sock_addr_len* sockDescriptor)
 
       if(recv_seq_num==exp_seq_num )
       {
-
-
-
-
           pthread_mutex_lock(&cond_mutex);   // change
-          if(recv_vec.size()<RECV_Q_LIMIT*MSS_DATA)
+          if(recv_vec.size()+bytes_received<=RECV_Q_LIMIT*MSS_DATA)
           {
             printf("packet received with sequence number = %d and bytes received = %d \n",recv_seq_num,bytes_received);
 
@@ -514,29 +511,25 @@ void recvbuffer_handle(unsigned char* recv_buf,sock_addr_len* sockDescriptor)
           pthread_cond_signal(&cond_var);
 
           pthread_mutex_unlock(&cond_mutex);     // change
-
-
-
-
-
-
       }
       else if(recv_seq_num!=exp_seq_num )
       {
-          send_ack(last_in_order,(RECV_Q_LIMIT-rec_Q_size)*MSS_DATA,sockDescriptor);
+          pthread_mutex_lock(&cond_mutex);   // change
+          send_ack(last_in_order,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
           printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
           printf("sending ACK for sequence number %d again\n",last_in_order);
+          pthread_mutex_unlock(&cond_mutex);     // change
       }
       else
       {
+
+          pthread_mutex_lock(&cond_mutex);     // change
           printf("in else, received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          send_ack(last_in_order,(RECV_Q_LIMIT-rec_Q_size)*MSS_DATA,sockDescriptor);
+          send_ack(last_in_order,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
           printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
           printf("sending ACK for sequence number %d again\n",last_in_order);
+          pthread_mutex_unlock(&cond_mutex);     // change
       }
-
-
-
 }
 
 void* udp_receive(void* param)
@@ -578,7 +571,7 @@ void* udp_receive(void* param)
                     char code[10];
                     strcpy(code,packet.code);
 
-                    printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, cwnd,base);
+                    printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, (int)cwnd,base);
 
                     if(strcmp(code,"ACK")==0)
                     {

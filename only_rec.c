@@ -72,14 +72,14 @@ int main(int argc, char **argv)
 
            }
 
-           sleep(2);
+
 
            close_instance();
 
            printf("Thread Joined\n" );
 
            fclose(received_file);
-           sleep(5);
+
 
 
 

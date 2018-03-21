@@ -112,10 +112,11 @@ int send_Q_size=0;
 int last_ack=0,last_one_ack=-1,last_two_ack=-2;
 static int alarm_fired = 0,alarm_is_on=1;
 int base=0,curr=0;
-int cwnd=3*MSS_DATA,fwnd=1000*MSS_DATA;
+double cwnd=3*MSS_DATA;
+int fwnd=1000*MSS_DATA;
 int bytes_running=1;
 int ack_seq_num;
-int SS_Thresh= 61440;
+int SS_Thresh=1000*MSS_DATA;
 sem_t send_full,send_empty;
 
 int data_to_be_sent;

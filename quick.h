@@ -76,14 +76,14 @@ typedef struct {
 
 int sockfd; /* socket file descriptor - an ID to uniquely identify a socket by the application program */
 int portno; /* port to listen on */
-int clientlen; /* byte size of client's address */
+socklen_t clientlen,tmp_client_len; /* byte size of client's address */
 struct sockaddr_in serveraddr; /* server's addr */
 struct sockaddr_in clientaddr; /* client addr */
 struct hostent *hostp; /* client host info */
 
 char *hostaddrp; /* dotted decimal host addr string */
 struct hostent *server;
-int serverlen;
+int serverlen, tmp_server_len;
 char *hostname;
 int optval; /* flag value for setsockopt */
 int n; /* message byte size */
@@ -125,7 +125,7 @@ std::vector<unsigned char> send_vec;
 int retransmitted=0;
 
 // client
-void createPacketAndSend(unsigned char* packet_buf, int bytes,int to_send_seq_num);
+void createPacketAndSend(unsigned char* packet_buf, int bytes,int to_send_seq_num,  sock_addr_len* sockDescriptor);
 void shift();
 int check_for_triple_duplicate();
 void mysig(int sig);
@@ -139,11 +139,11 @@ void init_send_modules(int to_send);
 
 // server
 
-void udp_send(unsigned char* send_buf, int sockfd, struct sockaddr_in addr,int addr_len, int size);
-void send_ack(int ack_num,int broadcast_window);
+void udp_send(unsigned char* send_buf, int sockfd, int size,sock_addr_len* sockDescriptor);
+void send_ack(int ack_num, int broadcast_window,sock_addr_len* sockDescriptor);
 rec_data_node appRecv();
 //response parse_packets(unsigned char* buf);
-void recvbuffer_handle(unsigned char* recv_buf);
+void recvbuffer_handle(unsigned char* recv_buf,sock_addr_len* sockDescriptor);
 void* udp_receive(void* param);
 //void* udp_recieve(void* param);
 
@@ -152,4 +152,5 @@ void init_receiver_modules();
 void wait_till_data_sent();
 void close_instance();
 void set_connection_to(char* name, int port);
+
 #endif

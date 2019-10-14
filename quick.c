@@ -260,20 +260,18 @@ void createPacketAndSend(unsigned char* packet_buf, int bytes,int to_send_seq_nu
 
 int app_send(unsigned char* packet_buf, int bytes)
 {
-  int ret=-1;
-  pthread_mutex_lock(&send_cond_mutex);   // change
-  while(bytes>SEND_Q_LIMIT*MSS_DATA-send_vec.size())
-  {
-    pthread_cond_wait(&send_cond_var,&send_cond_mutex);
-  }
-  vector<unsigned char> tmp_vec(packet_buf,packet_buf+bytes);
-  send_vec.insert(send_vec.begin()+send_vec.size(),tmp_vec.begin(),tmp_vec.end());
-  //cout<<"Inserting: "<<packet_buf<<endl;
-  printf("Inserted in send buffer, size of send buff: %d\n",send_vec.size() );
-  pthread_mutex_unlock(&send_cond_mutex);
-  ret=1;
-  return ret;
-
+    int ret=-1;
+    pthread_mutex_lock(&send_cond_mutex);   // change
+    while(bytes>SEND_Q_LIMIT*MSS_DATA-send_vec.size())
+    {
+        pthread_cond_wait(&send_cond_var,&send_cond_mutex);
+    }
+    vector<unsigned char> tmp_vec(packet_buf,packet_buf+bytes);
+    send_vec.insert(send_vec.begin()+send_vec.size(),tmp_vec.begin(),tmp_vec.end());
+    printf("Inserted in send buffer, size of send buff: %d\n",send_vec.size() );
+    pthread_mutex_unlock(&send_cond_mutex);
+    ret=1;
+    return ret;
 }
 
 response parse_packets(unsigned char* buf)
@@ -446,144 +444,130 @@ rec_data_node changedappRecv(int bytesReqd)
 }
 void recvbuffer_handle(unsigned char* recv_buf,sock_addr_len* sockDescriptor)
 {
-  //printf("IN rec buffer handle\n" );
-  int ret=-1;
-  int_to_char num_char;
-  char packet_buf[BUFSIZE];
-  int bytes_received;
+    //printf("IN rec buffer handle\n" );
+    int ret=-1;
+    int_to_char num_char;
+    char packet_buf[BUFSIZE];
+    int bytes_received;
 
-        // getting the sequence number
-      num_char.bytes[0]=recv_buf[0];
-      num_char.bytes[1]=recv_buf[1];
-      num_char.bytes[2]=recv_buf[2];
-      num_char.bytes[3]=recv_buf[3];
+    // getting the sequence number
+    num_char.bytes[0]=recv_buf[0];
+    num_char.bytes[1]=recv_buf[1];
+    num_char.bytes[2]=recv_buf[2];
+    num_char.bytes[3]=recv_buf[3];
 
-      recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
+    recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
 
-        // getting the number of bytes
-      num_char.bytes[0]=recv_buf[4];
-      num_char.bytes[1]=recv_buf[5];
-      num_char.bytes[2]=recv_buf[6];
-      num_char.bytes[3]=recv_buf[7];
+    // getting the number of bytes
+    num_char.bytes[0]=recv_buf[4];
+    num_char.bytes[1]=recv_buf[5];
+    num_char.bytes[2]=recv_buf[6];
+    num_char.bytes[3]=recv_buf[7];
 
-      bytes_received=num_char.no;                 // BYTES RECIEVED
+    bytes_received=num_char.no;                 // BYTES RECIEVED
 
-      if(recv_seq_num==exp_seq_num )
-      {
-          pthread_mutex_lock(&cond_mutex);   // change
-          if(recv_vec.size()+bytes_received<=RECV_Q_LIMIT*MSS_DATA)
-          {
+    if(recv_seq_num==exp_seq_num )
+    {
+        pthread_mutex_lock(&cond_mutex);   // change
+        if(recv_vec.size()+bytes_received<=RECV_Q_LIMIT*MSS_DATA)
+        {
             printf("packet received with sequence number = %d and bytes received = %d \n",recv_seq_num,bytes_received);
-
             vector<unsigned char> tmp_vec(recv_buf+8,recv_buf+8+bytes_received);
             recv_vec.insert(recv_vec.begin()+recv_vec.size(),tmp_vec.begin(),tmp_vec.end());
-
-
-
             printf("REC q size: %d\n",recv_vec.size() );
             last_in_order=recv_seq_num+bytes_received-1;
             exp_seq_num+=bytes_received;
-          }
-          send_ack(recv_seq_num+bytes_received-1,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
-          pthread_cond_signal(&cond_var);
-
-          pthread_mutex_unlock(&cond_mutex);     // change
-      }
-      else if(recv_seq_num!=exp_seq_num )
-      {
-          pthread_mutex_lock(&cond_mutex);   // change
-          send_ack(last_in_order,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
-          printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          printf("sending ACK for sequence number %d again\n",last_in_order);
-          pthread_mutex_unlock(&cond_mutex);     // change
-      }
-      else
-      {
-
-          pthread_mutex_lock(&cond_mutex);     // change
-          printf("in else, received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          send_ack(last_in_order,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
-          printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
-          printf("sending ACK for sequence number %d again\n",last_in_order);
-          pthread_mutex_unlock(&cond_mutex);     // change
-      }
+        }
+        send_ack(recv_seq_num+bytes_received-1,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
+        pthread_cond_signal(&cond_var);
+        pthread_mutex_unlock(&cond_mutex);     // change
+    }
+    else if(recv_seq_num!=exp_seq_num )
+    {
+        pthread_mutex_lock(&cond_mutex);   // change
+        send_ack(last_in_order,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
+        printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
+        printf("sending ACK for sequence number %d again\n",last_in_order);
+        pthread_mutex_unlock(&cond_mutex);     // change
+    }
+    else
+    {
+        pthread_mutex_lock(&cond_mutex);     // change
+        printf("in else, received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
+        send_ack(last_in_order,RECV_Q_LIMIT*MSS_DATA-recv_vec.size(),sockDescriptor);
+        printf("received sequence number (%d) doesn't match with expected sequence number (%d) , continuing \n",recv_seq_num,exp_seq_num);
+        printf("sending ACK for sequence number %d again\n",last_in_order);
+        pthread_mutex_unlock(&cond_mutex);     // change
+    }
 }
 
 void* udp_receive(void* param)
 {
 
 
-  unsigned char* recv_buf;
-  recv_buf=(unsigned char*)(malloc(sizeof(char)*BUFSIZE));                            // RECIEVE MESSAGE FROM CLIENT IN recv_buf
-  memset(recv_buf,'\0',sizeof(recv_buf));
-  sock_addr_len* sockDescriptor=(sock_addr_len*)param;
+    unsigned char* recv_buf;
+    recv_buf=(unsigned char*)(malloc(sizeof(char)*BUFSIZE));                            // RECIEVE MESSAGE FROM CLIENT IN recv_buf
+    memset(recv_buf,'\0',sizeof(recv_buf));
+    sock_addr_len* sockDescriptor=(sock_addr_len*)param;
 
-  while(1)
-  {
+    while(1)
+    {
+        memset(recv_buf,'\0',sizeof(recv_buf));
+        n = recvfrom(sockfd, recv_buf, BUFSIZE, 0,(struct sockaddr*) &sockDescriptor->addr,(socklen_t*) &sockDescriptor->len);
+        if(n < 0)
+        {
+            if (errno == EWOULDBLOCK)
+            {
+                fprintf(stderr, "socket timeout\n");
+                alarm_fired=1;
+                sleep(2);
+                continue;
+            }
+            else
+            {
+                printf("ERROR in ACK received error at seq_number ");
+            }
+        }
+        else
+        {
+            response packet;
+            packet=parse_packets(recv_buf);
+            if(!packet.isData)
+            {
+                char code[10];
+                strcpy(code,packet.code);
 
-              memset(recv_buf,'\0',sizeof(recv_buf));
+                printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, (int)cwnd,base);
 
-              n = recvfrom(sockfd, recv_buf, BUFSIZE, 0,(struct sockaddr*) &sockDescriptor->addr,(socklen_t*) &sockDescriptor->len);
-              if(n < 0)
-              {
-                      if (errno == EWOULDBLOCK)
-                      {
-                          fprintf(stderr, "socket timeout\n");
-                          alarm_fired=1;
-                          sleep(2);
-                          continue;
-                      }
-                      else
-                      {
-                          printf("ERROR in ACK received error at seq_number ");
-                      }
-              }
-              else
-              {
-                  response packet;
-                  packet=parse_packets(recv_buf);
-                  if(!packet.isData)
-                  {
-
-                    char code[10];
-                    strcpy(code,packet.code);
-
-                    printf("ACK NUM: %d, curr: %d, cwnd: %d, base: %d\n",ack_seq_num, curr, (int)cwnd,base);
-
-                    if(strcmp(code,"ACK")==0)
+                if(strcmp(code,"ACK")==0)
+                {
+                    shift();
+                    update_window(code);
+                }
+            }
+            else
+            {
+                double r = (((double) rand()) / (RAND_MAX));
+                printf(" R is %f\n",r);
+                if (r<= drop_prob && (exp_seq_num!=1 ||exp_seq_num!=2) )
                     {
-                      shift();
-                      update_window(code);
+                        printf("DROPPING PACKETS\n");
+                        sleep(2);
+                        continue;
                     }
-                  }
-                  else
-                  {
-                    double r = (((double) rand()) / (RAND_MAX));
-                    printf(" R is %f\n",r);
-                    if (r<= drop_prob && (exp_seq_num!=1 ||exp_seq_num!=2) )
-                        {
-                          printf("DROPPING PACKETS\n");
-                          sleep(2);
-                          continue;
-                        }
-                    int_to_char num_char;
-                    num_char.bytes[0]=recv_buf[0];
-                    num_char.bytes[1]=recv_buf[1];
-                    num_char.bytes[2]=recv_buf[2];
-                    num_char.bytes[3]=recv_buf[3];
+                int_to_char num_char;
+                num_char.bytes[0]=recv_buf[0];
+                num_char.bytes[1]=recv_buf[1];
+                num_char.bytes[2]=recv_buf[2];
+                num_char.bytes[3]=recv_buf[3];
 
-                    recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
-                    printf("rec seq num: %d\n",recv_seq_num );
-                    recvbuffer_handle(recv_buf,sockDescriptor);
-                  }
-              }
-
-
-
-  }
-
-
-  printf("file received \n");
+                recv_seq_num= num_char.no;                  // RECIEVED SEQ NUM
+                printf("rec seq num: %d\n",recv_seq_num );
+                recvbuffer_handle(recv_buf,sockDescriptor);
+            }
+        }
+    }
+    printf("file received \n");
 
 }
 void init_send_modules(int to_send,struct sockaddr_in sockaddr, int socklen)
